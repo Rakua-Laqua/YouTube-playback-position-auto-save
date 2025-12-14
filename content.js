@@ -4,7 +4,7 @@
 
   // 定数
   const STORAGE_KEY_PREFIX = 'yt_position_';
-  const SAVE_INTERVAL_MS = 5000; // 5秒ごとに保存
+  const DEFAULT_SAVE_INTERVAL_MS = 5000; // デフォルト: 5秒ごとに保存
   const VIDEO_CHECK_INTERVAL_MS = 100; // 動画要素チェック間隔
   const VIDEO_CHECK_TIMEOUT_MS = 5000; // 動画要素チェックタイムアウト
   const NOTIFICATION_DURATION_MS = 3000; // 通知表示時間
@@ -20,6 +20,61 @@
   let video = null;
   let lastValidPosition = null; // 最後の有効な再生位置をメモリに保持
   let isRestoring = false; // 復元中フラグ（イベント競合防止）
+
+  // 設定（chrome.storage.sync）
+  const DEFAULT_SETTINGS = {
+    saveIntervalSeconds: 5,
+    autoplayAfterRestore: true,
+    showNotification: true,
+    skipAds: false
+  };
+
+  let settings = { ...DEFAULT_SETTINGS };
+  let saveIntervalMs = DEFAULT_SAVE_INTERVAL_MS;
+
+  function normalizeSettings(raw) {
+    const next = { ...DEFAULT_SETTINGS, ...(raw || {}) };
+
+    const seconds = Number(next.saveIntervalSeconds);
+    if (!Number.isFinite(seconds) || !Number.isInteger(seconds) || seconds <= 0) {
+      next.saveIntervalSeconds = DEFAULT_SETTINGS.saveIntervalSeconds;
+    }
+
+    next.autoplayAfterRestore = !!next.autoplayAfterRestore;
+    next.showNotification = !!next.showNotification;
+    next.skipAds = !!next.skipAds;
+
+    return next;
+  }
+
+  function applySettings(nextSettings) {
+    settings = normalizeSettings(nextSettings);
+    saveIntervalMs = Math.max(1000, settings.saveIntervalSeconds * 1000);
+
+    // 動作中なら反映（保存間隔変更など）
+    if (currentVideoId && saveIntervalId) {
+      startSaving();
+    }
+  }
+
+  async function loadSettings() {
+    if (!isExtensionValid()) return;
+
+    try {
+      const stored = await chrome.storage.sync.get(DEFAULT_SETTINGS);
+      applySettings(stored);
+    } catch (e) {
+      // 拡張機能が無効/取得失敗の場合はデフォルトのまま
+      applySettings(DEFAULT_SETTINGS);
+    }
+  }
+
+  function isAdShowing() {
+    // 実験的: YouTubeのクラス名に依存するため、将来的に変わる可能性があります
+    const player = document.querySelector('.html5-video-player');
+    if (!player) return false;
+    return player.classList.contains('ad-showing') || player.classList.contains('ad-interrupting');
+  }
 
   // イベントハンドラー（削除用に参照を保持）
   function handlePause() {
@@ -90,6 +145,9 @@
     
     // 復元中は保存しない
     if (isRestoring) return;
+
+    // 広告中は保存しない（設定）
+    if (settings.skipAds && isAdShowing()) return;
     
     // 一時停止中は保存しない（定期保存の重複防止、オプションでスキップ可能）
     if (!skipPauseCheck && video.paused) return;
@@ -154,6 +212,11 @@
       const data = result[getStorageKey(currentVideoId)];
       
       if (data && data.position) {
+        // 広告中は復元しない（設定）
+        if (settings.skipAds && isAdShowing()) {
+          return;
+        }
+
         // 動画の長さが変わっていないか確認
         if (video.duration && Math.abs(video.duration - data.duration) > DURATION_DIFF_THRESHOLD) {
           console.log(`[YouTube再生位置保存] 動画の長さが異なるため復元をスキップ`);
@@ -163,31 +226,37 @@
         // 復元中フラグをセット
         isRestoring = true;
 
-        // 一時停止してから再生位置を復元（最初の数秒が再生されるのを防ぐ）
-        video.pause();
-        video.currentTime = data.position;
-        
-        // シークが完了したら再生を再開
-        await new Promise((resolve) => {
-          const handleSeeked = () => {
-            video.removeEventListener('seeked', handleSeeked);
-            resolve();
-          };
-          video.addEventListener('seeked', handleSeeked);
-        });
-        
-        // 復元完了、再生開始
-        video.play().catch(() => {
-          // 自動再生がブロックされた場合は無視
-        });
-        
-        // 復元中フラグを解除
-        isRestoring = false;
-        
-        console.log(`[YouTube再生位置保存] 復元: ${Math.floor(data.position)}秒から再開`);
-        
-        // 復元完了を通知（トースト表示）
-        showNotification(`${Math.floor(data.position)}秒から再開します`);
+        try {
+          // 一時停止してから再生位置を復元（最初の数秒が再生されるのを防ぐ）
+          video.pause();
+          video.currentTime = data.position;
+          
+          // シークが完了したら再生を再開
+          await new Promise((resolve) => {
+            const handleSeeked = () => {
+              video.removeEventListener('seeked', handleSeeked);
+              resolve();
+            };
+            video.addEventListener('seeked', handleSeeked);
+          });
+          
+          // 復元完了、必要なら再生開始
+          if (settings.autoplayAfterRestore) {
+            video.play().catch(() => {
+              // 自動再生がブロックされた場合は無視
+            });
+          }
+
+          console.log(`[YouTube再生位置保存] 復元: ${Math.floor(data.position)}秒から再開`);
+          
+          // 復元完了を通知（トースト表示）
+          if (settings.showNotification) {
+            showNotification(`${Math.floor(data.position)}秒から再開します`);
+          }
+        } finally {
+          // 復元中フラグを解除
+          isRestoring = false;
+        }
       }
     } catch (e) {
       isRestoring = false;
@@ -225,7 +294,7 @@
     if (saveIntervalId) {
       clearInterval(saveIntervalId);
     }
-    saveIntervalId = setInterval(savePosition, SAVE_INTERVAL_MS);
+    saveIntervalId = setInterval(savePosition, saveIntervalMs);
   }
 
   // 定期保存を停止
@@ -341,8 +410,24 @@
     saveLastValidPosition();
   });
 
-  // 初期化
-  init();
+  // 設定反映（変更があれば即時反映）
+  try {
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName !== 'sync') return;
+      const changed = {};
+      for (const [key, value] of Object.entries(changes)) {
+        changed[key] = value?.newValue;
+      }
+      applySettings({ ...settings, ...changed });
+    });
+  } catch (e) {
+    // 拡張機能が無効な場合は無視
+  }
+
+  // 初期化（設定を読み込んでから開始）
+  loadSettings().finally(() => {
+    init();
+  });
 
   // YouTubeのナビゲーションイベントを使用（MutationObserverより効率的）
   window.addEventListener('yt-navigate-finish', () => {

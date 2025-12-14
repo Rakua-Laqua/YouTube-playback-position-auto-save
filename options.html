@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>YouTube 再生位置自動保存 - 設定</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>YouTube 再生位置自動保存 - 設定</h1>
+
+      <section class="card">
+        <h2>保存</h2>
+
+        <div class="row">
+          <label for="saveIntervalSelect">保存間隔</label>
+          <div class="field">
+            <select id="saveIntervalSelect">
+              <option value="5">5秒</option>
+              <option value="10">10秒</option>
+              <option value="30">30秒</option>
+              <option value="60">60秒</option>
+              <option value="custom">カスタム</option>
+            </select>
+            <div class="hint">※整数のみ。0秒以下は設定できません。</div>
+          </div>
+        </div>
+
+        <div class="row" id="customIntervalRow" hidden>
+          <label for="customIntervalInput">カスタム（秒）</label>
+          <div class="field">
+            <input id="customIntervalInput" type="number" inputmode="numeric" min="1" step="1" placeholder="例: 7" />
+            <div class="error" id="customIntervalError" role="alert" aria-live="polite"></div>
+          </div>
+        </div>
+
+        <div class="row">
+          <label for="skipAds">広告中は保存しない（実験的）</label>
+          <div class="field">
+            <input id="skipAds" type="checkbox" />
+            <div class="hint">YouTubeの仕様変更で効かなくなる可能性があります。</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>復元</h2>
+
+        <div class="row">
+          <label for="autoplayAfterRestore">復元後に自動再生</label>
+          <div class="field">
+            <input id="autoplayAfterRestore" type="checkbox" />
+            <div class="hint">ブラウザの自動再生制限により、失敗する場合があります。</div>
+          </div>
+        </div>
+
+        <div class="row">
+          <label for="showNotification">通知を表示</label>
+          <div class="field">
+            <input id="showNotification" type="checkbox" />
+          </div>
+        </div>
+      </section>
+
+      <section class="actions">
+        <button id="saveButton" type="button">保存</button>
+        <button id="resetButton" type="button" class="secondary">初期値に戻す</button>
+        <span id="status" class="status" aria-live="polite"></span>
+      </section>
+    </main>
+
+    <script src="options.js"></script>
+  </body>
+</html>
