@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "YouTube 再生位置自動保存",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "YouTubeの再生位置を自動的に保存し、再訪問時に復元します",
   "permissions": [
     "storage"

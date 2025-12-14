@@ -21,6 +21,20 @@
   let lastValidPosition = null; // 最後の有効な再生位置をメモリに保持
   let isRestoring = false; // 復元中フラグ（イベント競合防止）
 
+  // initの多重起動抑止
+  let initTimerId = null;
+  let lastNavigateFinishAt = 0;
+
+  function scheduleInit(delayMs = 0) {
+    if (initTimerId) {
+      clearTimeout(initTimerId);
+    }
+    initTimerId = setTimeout(() => {
+      initTimerId = null;
+      init();
+    }, delayMs);
+  }
+
   // イベントハンドラー（削除用に参照を保持）
   function handlePause() {
     savePositionOnPause();
@@ -140,6 +154,17 @@
     } catch (e) {
       // 拡張機能が無効な場合は無視
     }
+  }
+
+  // 遷移/非表示/離脱時の保存を統一（popstate等の相性改善）
+  function saveForNavigation() {
+    // 可能なら現在のvideoから直接保存（lastValidPositionに依存しない）
+    if (currentVideoId && video) {
+      savePositionCore(currentVideoId, { skipPauseCheck: true });
+    } else {
+      saveLastValidPosition();
+    }
+    lastValidPosition = null;
   }
 
   // 保存された再生位置を復元
@@ -338,31 +363,34 @@
 
   // ページ離脱時に保存
   window.addEventListener('beforeunload', () => {
-    saveLastValidPosition();
+    saveForNavigation();
   });
 
   // 初期化
-  init();
+  scheduleInit(0);
 
   // YouTubeのナビゲーションイベントを使用（MutationObserverより効率的）
   window.addEventListener('yt-navigate-finish', () => {
-    saveLastValidPosition();
-    lastValidPosition = null;
-    init();
+    lastNavigateFinishAt = Date.now();
+    saveForNavigation();
+    scheduleInit(0);
   });
 
   // popstate（戻る/進むボタン）でも動作
   window.addEventListener('popstate', () => {
-    // メモリに保持した最後の位置を保存
-    saveLastValidPosition();
-    lastValidPosition = null;
-    setTimeout(init, POPSTATE_INIT_DELAY_MS);
+    saveForNavigation();
+
+    // yt-navigate-finish直後のpopstateは二重初期化になりやすいので抑止
+    const now = Date.now();
+    if (now - lastNavigateFinishAt < 250) return;
+
+    scheduleInit(POPSTATE_INIT_DELAY_MS);
   });
 
   // visibilitychange（タブ切り替え時）に保存
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
-      saveLastValidPosition();
+      saveForNavigation();
     }
   });
 
