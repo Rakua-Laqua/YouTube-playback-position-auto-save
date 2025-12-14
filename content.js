@@ -13,6 +13,8 @@
   const MIN_SAVE_TIME = 0; // 最小保存時間（秒）
   const DURATION_DIFF_THRESHOLD = 5; // 動画長さの差異許容値（秒）
   const POPSTATE_INIT_DELAY_MS = 300; // popstate後の初期化遅延
+  const SEEKED_TIMEOUT_MS = 5000; // seeked待ちタイムアウト（ms）
+  const SEEK_TARGET_EPSILON_SECONDS = 0.5; // 目標位置到達判定の許容差（秒）
 
   let currentVideoId = null;
   let saveIntervalId = null;
@@ -74,6 +76,61 @@
     const player = document.querySelector('.html5-video-player');
     if (!player) return false;
     return player.classList.contains('ad-showing') || player.classList.contains('ad-interrupting');
+  }
+
+  function isCloseToTarget(currentTime, targetTime) {
+    if (!Number.isFinite(currentTime) || !Number.isFinite(targetTime)) return false;
+    return Math.abs(currentTime - targetTime) <= SEEK_TARGET_EPSILON_SECONDS;
+  }
+
+  function waitForSeekCompletion(targetTimeSeconds) {
+    if (!video) return Promise.resolve(false);
+
+    return new Promise((resolve) => {
+      let resolved = false;
+      let pollIntervalId = null;
+      let timeoutId = null;
+
+      const cleanup = () => {
+        if (timeoutId) clearTimeout(timeoutId);
+        if (pollIntervalId) clearInterval(pollIntervalId);
+        try {
+          video.removeEventListener('seeked', onSeeked);
+        } catch (e) {
+          // 無視
+        }
+      };
+
+      const finish = (ok) => {
+        if (resolved) return;
+        resolved = true;
+        cleanup();
+        resolve(ok);
+      };
+
+      const onSeeked = () => {
+        finish(true);
+      };
+
+      try {
+        video.addEventListener('seeked', onSeeked);
+      } catch (e) {
+        // 無視
+      }
+
+      // フォールバック：seekingが落ち着き、目標位置付近なら成功扱い
+      pollIntervalId = setInterval(() => {
+        if (!video) return;
+        if (!video.seeking && isCloseToTarget(video.currentTime, targetTimeSeconds)) {
+          finish(true);
+        }
+      }, 50);
+
+      timeoutId = setTimeout(() => {
+        if (!video) return finish(false);
+        finish(isCloseToTarget(video.currentTime, targetTimeSeconds));
+      }, SEEKED_TIMEOUT_MS);
+    });
   }
 
   // イベントハンドラー（削除用に参照を保持）
@@ -231,14 +288,12 @@
           video.pause();
           video.currentTime = data.position;
           
-          // シークが完了したら再生を再開
-          await new Promise((resolve) => {
-            const handleSeeked = () => {
-              video.removeEventListener('seeked', handleSeeked);
-              resolve();
-            };
-            video.addEventListener('seeked', handleSeeked);
-          });
+          // シークが完了したら次へ（タイムアウト付きでデッドロック回避）
+          const seekOk = await waitForSeekCompletion(data.position);
+          if (!seekOk) {
+            // 異常系のみ：seekedが来ない/到達しない場合でも保存停止を防ぐ
+            return;
+          }
           
           // 復元完了、必要なら再生開始
           if (settings.autoplayAfterRestore) {
