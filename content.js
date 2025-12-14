@@ -305,22 +305,24 @@
           return;
         }
 
-        // 動画の長さが変わっていないか確認
-        // 広告/ブロッカー等で duration が一時的に不安定になるケースがあるため、少し待ってから判定する
-        if (video.duration && Math.abs(video.duration - data.duration) > DURATION_DIFF_THRESHOLD) {
-          const ok = await waitForDurationWithinThreshold(data.duration);
-          if (!ok) {
-            console.log(`[YouTube再生位置保存] 動画の長さが異なるため復元をスキップ`);
-            return;
-          }
-        }
-
         // 復元中フラグをセット
         isRestoring = true;
 
         try {
-          // 一時停止してから再生位置を復元（最初の数秒が再生されるのを防ぐ）
+          // duration安定待ちの間に00:00が再生されないよう、先に一時停止
           video.pause();
+
+          // 動画の長さが変わっていないか確認
+          // 広告/ブロッカー等で duration が一時的に不安定になるケースがあるため、少し待ってから判定する
+          if (video.duration && Math.abs(video.duration - data.duration) > DURATION_DIFF_THRESHOLD) {
+            const ok = await waitForDurationWithinThreshold(data.duration);
+            if (!ok) {
+              console.log(`[YouTube再生位置保存] 動画の長さが異なるため復元をスキップ`);
+              return;
+            }
+          }
+
+          // 一時停止してから再生位置を復元（最初の数秒が再生されるのを防ぐ）
           video.currentTime = data.position;
           
           // シークが完了したら次へ（タイムアウト付きでデッドロック回避）
