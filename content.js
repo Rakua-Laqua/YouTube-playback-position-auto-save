@@ -15,6 +15,8 @@
   const POPSTATE_INIT_DELAY_MS = 300; // popstate後の初期化遅延
   const SEEKED_TIMEOUT_MS = 5000; // seeked待ちタイムアウト（ms）
   const SEEK_TARGET_EPSILON_SECONDS = 0.5; // 目標位置到達判定の許容差（秒）
+  const DURATION_STABILIZE_TIMEOUT_MS = 3000; // duration安定待ちタイムアウト（ms）
+  const DURATION_STABILIZE_POLL_MS = 200; // duration安定待ちポーリング間隔（ms）
 
   let currentVideoId = null;
   let saveIntervalId = null;
@@ -131,6 +133,35 @@
         finish(isCloseToTarget(video.currentTime, targetTimeSeconds));
       }, SEEKED_TIMEOUT_MS);
     });
+  }
+
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async function waitForDurationWithinThreshold(savedDurationSeconds) {
+    if (!video) return false;
+    if (!Number.isFinite(savedDurationSeconds)) return true;
+
+    const start = Date.now();
+    while (Date.now() - start < DURATION_STABILIZE_TIMEOUT_MS) {
+      const d = video.duration;
+      if (d && Number.isFinite(d) && d >= MIN_VALID_DURATION) {
+        if (Math.abs(d - savedDurationSeconds) <= DURATION_DIFF_THRESHOLD) {
+          return true;
+        }
+      }
+      await sleep(DURATION_STABILIZE_POLL_MS);
+    }
+
+    // 最後にもう一度チェック
+    const finalDuration = video.duration;
+    if (finalDuration && Number.isFinite(finalDuration) && finalDuration >= MIN_VALID_DURATION) {
+      return Math.abs(finalDuration - savedDurationSeconds) <= DURATION_DIFF_THRESHOLD;
+    }
+
+    // durationが最後まで有効値にならない場合は、誤スキップ回避のため「復元を許可」
+    return true;
   }
 
   // イベントハンドラー（削除用に参照を保持）
@@ -275,9 +306,13 @@
         }
 
         // 動画の長さが変わっていないか確認
+        // 広告/ブロッカー等で duration が一時的に不安定になるケースがあるため、少し待ってから判定する
         if (video.duration && Math.abs(video.duration - data.duration) > DURATION_DIFF_THRESHOLD) {
-          console.log(`[YouTube再生位置保存] 動画の長さが異なるため復元をスキップ`);
-          return;
+          const ok = await waitForDurationWithinThreshold(data.duration);
+          if (!ok) {
+            console.log(`[YouTube再生位置保存] 動画の長さが異なるため復元をスキップ`);
+            return;
+          }
         }
 
         // 復元中フラグをセット
