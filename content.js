@@ -1,5 +1,5 @@
 // YouTube 再生位置自動保存 拡張機能
-(function() {
+(function () {
   'use strict';
 
   // 定数
@@ -39,16 +39,16 @@
   function handlePause() {
     savePositionOnPause();
   }
-  
+
   function handleTimeUpdate() {
     if (!currentVideoId || !video) return;
-    
+
     const currentTime = video.currentTime;
     const duration = video.duration;
-    
+
     if (!duration || isNaN(duration) || duration < MIN_VALID_DURATION) return;
     if (isNaN(currentTime) || currentTime < MIN_SAVE_TIME) return;
-    
+
     // メモリに最新位置を保持
     lastValidPosition = {
       videoId: currentVideoId,
@@ -60,7 +60,7 @@
       }
     };
   }
-  
+
   function handleEnded() {
     // 動画終了時は保存データを削除
     if (!isExtensionValid()) return;
@@ -98,16 +98,16 @@
   // 再生位置を保存（共通ロジック）
   function savePositionCore(targetVideoId, options = {}) {
     const { skipPauseCheck = false } = options;
-    
+
     if (!isExtensionValid()) return;
     if (!video || !targetVideoId) return;
-    
+
     // 復元中は保存しない
     if (isRestoring) return;
-    
+
     // 一時停止中は保存しない（定期保存の重複防止、オプションでスキップ可能）
     if (!skipPauseCheck && video.paused) return;
-    
+
     const currentTime = video.currentTime;
     const duration = video.duration;
 
@@ -173,11 +173,11 @@
 
     // ストレージからデータを取得（async/awaitで順序保証）
     if (!isExtensionValid()) return;
-    
+
     try {
       const result = await chrome.storage.local.get(getStorageKey(currentVideoId));
       const data = result[getStorageKey(currentVideoId)];
-      
+
       if (data && data.position) {
         // 動画の長さが変わっていないか確認
         if (video.duration && Math.abs(video.duration - data.duration) > DURATION_DIFF_THRESHOLD) {
@@ -191,7 +191,7 @@
         // 一時停止してから再生位置を復元（最初の数秒が再生されるのを防ぐ）
         video.pause();
         video.currentTime = data.position;
-        
+
         // シークが完了したら再生を再開
         await new Promise((resolve) => {
           const handleSeeked = () => {
@@ -200,17 +200,17 @@
           };
           video.addEventListener('seeked', handleSeeked);
         });
-        
+
         // 復元完了、再生開始
         video.play().catch(() => {
           // 自動再生がブロックされた場合は無視
         });
-        
+
         // 復元中フラグを解除
         isRestoring = false;
-        
+
         console.log(`[YouTube再生位置保存] 復元: ${Math.floor(data.position)}秒から再開`);
-        
+
         // 復元完了を通知（トースト表示）
         showNotification(`${Math.floor(data.position)}秒から再開します`);
       }
@@ -288,7 +288,7 @@
 
     // 前のリスナーを削除
     cleanupVideoListeners();
-    
+
     video = newVideo;
 
     // イベントリスナーを設定
@@ -302,7 +302,7 @@
   // メイン処理
   async function init() {
     const videoId = getVideoId();
-    
+
     // 動画ページでない場合は何もしない
     if (!videoId) {
       stopSaving();
@@ -329,7 +329,7 @@
     videoCheckIntervalId = setInterval(async () => {
       if (setupVideo()) {
         cleanupVideoCheckInterval();
-        
+
         // 保存データがあるか事前にチェック
         let hasStoredPosition = false;
         try {
@@ -338,12 +338,12 @@
         } catch (e) {
           // 無視
         }
-        
+
         // 保存データがある場合は即座に一時停止（最初の数秒再生を防ぐ）
         if (hasStoredPosition) {
           video.pause();
         }
-        
+
         // 動画のメタデータが読み込まれたら復元
         if (video.readyState >= 1) {
           await restorePosition();
