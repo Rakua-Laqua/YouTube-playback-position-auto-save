@@ -64,5 +64,9 @@
   "notificationResumeAt": {
     "message": "{position}秒から再開します",
     "description": "復元時の通知メッセージ"
+  },
+  "popupSearchPlaceholder": {
+    "message": "タイトルまたは動画IDで検索",
+    "description": "検索バーのプレースホルダー"
   }
 }

@@ -12,6 +12,12 @@
       const msg = chrome.i18n.getMessage(key);
       if (msg) el.textContent = msg;
     });
+    // placeholder 属性
+    document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => {
+      const key = el.getAttribute('data-i18n-placeholder');
+      const msg = chrome.i18n.getMessage(key);
+      if (msg) el.placeholder = msg;
+    });
     // タイトル属性
     document.title = chrome.i18n.getMessage('extName') || document.title;
   }
@@ -84,6 +90,36 @@
     return new Blob([JSON.stringify(videos)]).size;
   }
 
+  // 動画を開く（既存タブがあればそちらに切替、なければ新規タブ）
+  async function openVideo(videoId) {
+    const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    try {
+      // 既存のYouTubeタブを検索
+      const tabs = await chrome.tabs.query({ url: 'https://www.youtube.com/*' });
+      const existingTab = tabs.find((tab) => {
+        if (!tab.url) return false;
+        try {
+          const url = new URL(tab.url);
+          return url.searchParams.get('v') === videoId;
+        } catch {
+          return false;
+        }
+      });
+
+      if (existingTab) {
+        // 既存タブをアクティブにし、そのウィンドウを前面に
+        await chrome.tabs.update(existingTab.id, { active: true });
+        await chrome.windows.update(existingTab.windowId, { focused: true });
+      } else {
+        // 既存タブがない場合は新規タブで開く
+        await chrome.tabs.create({ url: videoUrl });
+      }
+    } catch (e) {
+      // フォールバック：新規タブで開く
+      await chrome.tabs.create({ url: videoUrl });
+    }
+  }
+
   // 動画リストを描画
   function renderVideoList(videos) {
     const listEl = document.getElementById('videoList');
@@ -118,7 +154,7 @@
       info.className = 'video-info';
       info.title = chrome.i18n.getMessage('popupOpenVideo') || 'YouTubeで開く';
       info.addEventListener('click', () => {
-        chrome.tabs.create({ url: `https://www.youtube.com/watch?v=${v.videoId}` });
+        openVideo(v.videoId);
       });
 
       const title = document.createElement('div');
@@ -184,6 +220,22 @@
     // 動画リスト表示
     const videos = await getAllVideoData();
     renderVideoList(videos);
+
+    // 検索フィルター
+    const searchInput = document.getElementById('searchInput');
+    searchInput.addEventListener('input', () => {
+      const query = searchInput.value.trim().toLowerCase();
+      if (!query) {
+        renderVideoList(videos);
+        return;
+      }
+      const filtered = videos.filter((v) => {
+        const title = (v.title || '').toLowerCase();
+        const id = v.videoId.toLowerCase();
+        return title.includes(query) || id.includes(query);
+      });
+      renderVideoList(filtered);
+    });
   }
 
   function updateToggleLabel(enabled, labelEl) {

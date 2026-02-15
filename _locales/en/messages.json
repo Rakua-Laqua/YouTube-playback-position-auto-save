@@ -64,5 +64,9 @@
   "notificationResumeAt": {
     "message": "Resuming from {position}s",
     "description": "Notification message on restore"
+  },
+  "popupSearchPlaceholder": {
+    "message": "Search by title or video ID",
+    "description": "Search bar placeholder"
   }
 }

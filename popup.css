@@ -103,7 +103,33 @@ header h1 {
 
 /* === アクションボタン === */
 .actions {
-  margin-bottom: 12px;
+  margin-bottom: 8px;
+}
+
+/* === 検索バー === */
+.search-wrapper {
+  margin-bottom: 10px;
+}
+
+.search-input {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid #2a2a4a;
+  border-radius: 5px;
+  background: #16213e;
+  color: #e8e8e8;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.search-input:focus {
+  border-color: #ff6b6b;
+}
+
+.search-input::placeholder {
+  color: #666;
 }
 
 .btn {
