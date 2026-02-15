@@ -1,5 +1,22 @@
 # YouTube 再生位置自動保存 - 更新履歴
 
+## [1.4.0] - 2026-02-16
+
+### 追加
+- **ポップアップUI**：ツールバーアイコンから保存済み動画の一覧表示・個別削除・一括削除・有効/無効切替が可能に
+- **多言語対応（i18n）**：日本語（デフォルト）・英語に対応。ブラウザの言語設定に自動追従
+- `_locales/ja/messages.json`、`_locales/en/messages.json` を追加
+- `popup.html`、`popup.js`、`popup.css` を追加
+
+### 修正
+- `seeked` イベントにタイムアウト（3秒）を追加し、イベントが発火しない場合でもフォールバックで復元処理を続行するように修正（Promise の永久ブロックを防止）
+
+### 変更
+- `manifest.json` の `name` / `description` を `__MSG_*__` 形式に変更（i18n対応）
+- `manifest.json` に `default_locale`、`action.default_popup` を追加
+
+---
+
 ## [1.3.1] - 2025-12-14
 
 ### 修正
@@ -90,3 +107,5 @@
 | `MIN_SAVE_TIME` | 0 | 最小保存時間（秒） |
 | `DURATION_DIFF_THRESHOLD` | 5 | 動画長さ差異許容値（秒） |
 | `POPSTATE_INIT_DELAY_MS` | 300 | popstate 後の初期化遅延（ms） |
+| `SEEKED_TIMEOUT_MS` | 3000 | seeked イベントのタイムアウト（ms） |
+| `SETTINGS_KEY` | `yt_position_settings` | 設定用ストレージキー |

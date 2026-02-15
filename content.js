@@ -13,6 +13,8 @@
   const MIN_SAVE_TIME = 0; // 最小保存時間（秒）
   const DURATION_DIFF_THRESHOLD = 5; // 動画長さの差異許容値（秒）
   const POPSTATE_INIT_DELAY_MS = 300; // popstate後の初期化遅延
+  const SEEKED_TIMEOUT_MS = 3000; // seeked イベントのタイムアウト（ms）
+  const SETTINGS_KEY = 'yt_position_settings'; // 設定用ストレージキー
 
   let currentVideoId = null;
   let saveIntervalId = null;
@@ -192,13 +194,25 @@
         video.pause();
         video.currentTime = data.position;
 
-        // シークが完了したら再生を再開
+        // シークが完了したら再生を再開（タイムアウト付き）
         await new Promise((resolve) => {
+          let settled = false;
           const handleSeeked = () => {
+            if (settled) return;
+            settled = true;
             video.removeEventListener('seeked', handleSeeked);
             resolve();
           };
           video.addEventListener('seeked', handleSeeked);
+          // seeked が発火しない場合のフォールバック
+          setTimeout(() => {
+            if (!settled) {
+              settled = true;
+              video.removeEventListener('seeked', handleSeeked);
+              console.log('[YouTube再生位置保存] seeked タイムアウト: フォールバックで続行');
+              resolve();
+            }
+          }, SEEKED_TIMEOUT_MS);
         });
 
         // 復元完了、再生開始
@@ -299,8 +313,26 @@
     return true;
   }
 
+  // 設定の有効/無効をチェック
+  async function isEnabled() {
+    try {
+      const result = await chrome.storage.local.get(SETTINGS_KEY);
+      const settings = result[SETTINGS_KEY];
+      return !settings || settings.enabled !== false;
+    } catch (e) {
+      return true; // 取得失敗時はデフォルト有効
+    }
+  }
+
   // メイン処理
   async function init() {
+    // 設定で無効化されている場合は停止
+    if (!(await isEnabled())) {
+      stopSaving();
+      currentVideoId = null;
+      return;
+    }
+
     const videoId = getVideoId();
 
     // 動画ページでない場合は何もしない

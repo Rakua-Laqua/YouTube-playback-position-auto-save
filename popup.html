@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1 data-i18n="extName"></h1>
+      <div class="toggle-wrapper">
+        <label class="toggle" title="">
+          <input type="checkbox" id="enableToggle" checked>
+          <span class="slider"></span>
+        </label>
+        <span id="toggleLabel" class="toggle-label" data-i18n="popupEnabled"></span>
+      </div>
+    </header>
+
+    <div class="storage-info">
+      <span id="storageCount"></span>
+      <span id="storageSize"></span>
+    </div>
+
+    <div class="actions">
+      <button id="deleteAllBtn" class="btn btn-danger" data-i18n="popupDeleteAll"></button>
+    </div>
+
+    <div id="videoList" class="video-list">
+      <!-- 動画リストがここに表示される -->
+    </div>
+
+    <div id="emptyMessage" class="empty-message" style="display:none" data-i18n="popupNoData">
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

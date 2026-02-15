@@ -1,0 +1,68 @@
+{
+  "extName": {
+    "message": "YouTube Playback Position Saver",
+    "description": "Extension name"
+  },
+  "extDescription": {
+    "message": "Automatically saves YouTube playback position and restores it on revisit",
+    "description": "Extension description"
+  },
+  "popupEnabled": {
+    "message": "Enabled",
+    "description": "Toggle label when enabled"
+  },
+  "popupDisabled": {
+    "message": "Disabled",
+    "description": "Toggle label when disabled"
+  },
+  "popupDeleteAll": {
+    "message": "Delete All",
+    "description": "Delete all button"
+  },
+  "popupDeleteAllConfirm": {
+    "message": "Delete all saved data?",
+    "description": "Delete all confirmation dialog"
+  },
+  "popupDelete": {
+    "message": "Delete",
+    "description": "Individual delete button tooltip"
+  },
+  "popupNoData": {
+    "message": "No saved data",
+    "description": "Message when no data exists"
+  },
+  "popupVideoCount": {
+    "message": "$COUNT$ videos",
+    "description": "Saved video count display",
+    "placeholders": {
+      "COUNT": {
+        "content": "{n}",
+        "example": "5"
+      }
+    }
+  },
+  "popupOpenVideo": {
+    "message": "Open on YouTube",
+    "description": "Video link tooltip"
+  },
+  "timeJustNow": {
+    "message": "Just now",
+    "description": "Relative time for just now"
+  },
+  "timeMinutesAgo": {
+    "message": "{n} min ago",
+    "description": "Relative time for minutes ago"
+  },
+  "timeHoursAgo": {
+    "message": "{n} hr ago",
+    "description": "Relative time for hours ago"
+  },
+  "timeDaysAgo": {
+    "message": "{n} days ago",
+    "description": "Relative time for days ago"
+  },
+  "notificationResumeAt": {
+    "message": "Resuming from {position}s",
+    "description": "Notification message on restore"
+  }
+}
