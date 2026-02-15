@@ -1,5 +1,22 @@
 # YouTube 再生位置自動保存 - 更新履歴
 
+## [1.5.0] - 2026-02-16
+
+### 追加
+- **ブラウザ再起動対応**：Service Worker（`background.js`）を追加し、ブラウザ再起動時・拡張機能更新時に既存のYouTubeタブへ content script を自動再注入
+- `content.js` に多重注入防止ガード（`window.__ytPositionSaverLoaded`）を追加
+
+### 改善
+- 例外処理の空 `catch` を `console.warn` に置換し、障害原因の追跡性を向上
+- `savePositionCore` を `async` 化し、`chrome.storage.local.set` を `await` で保存完了を保証
+- `loadedmetadata` コールバック内でクロージャ変数（`capturedVideoId`）を使用し、急速連続遷移時のコンテキスト混線を防止
+- `video.play()` 失敗時にエラー理由をログ出力するように変更
+
+### 変更
+- `manifest.json` に `scripting` 権限と `background.service_worker` を追加
+
+---
+
 ## [1.4.0] - 2026-02-16
 
 ### 追加
@@ -83,6 +100,10 @@
 ### 使用 API
 - `chrome.storage.local` - 再生位置の保存
 - `chrome.runtime.id` - 拡張機能の有効性チェック
+- `chrome.scripting.executeScript` - 再起動時のスクリプト再注入
+- `chrome.runtime.onStartup` - ブラウザ起動検出
+- `chrome.runtime.onInstalled` - 拡張機能インストール/更新検出
+- `chrome.tabs.query` - 既存タブの取得
 
 ### イベント
 - `yt-navigate-finish` - YouTube SPA ナビゲーション検出

@@ -2,6 +2,10 @@
 (function () {
   'use strict';
 
+  // 多重注入防止（SW による再注入時に二重起動しない）
+  if (window.__ytPositionSaverLoaded) return;
+  window.__ytPositionSaverLoaded = true;
+
   // 定数
   const STORAGE_KEY_PREFIX = 'yt_position_';
   const SAVE_INTERVAL_MS = 5000; // 5秒ごとに保存
@@ -72,7 +76,7 @@
         lastValidPosition = null;
         console.log(`[YouTube再生位置保存] 動画終了: 保存データを削除`);
       } catch (e) {
-        // 拡張機能が無効な場合は無視
+        console.warn('[YouTube再生位置保存] 動画終了時の削除失敗:', e.message || e);
       }
     }
   }
@@ -98,7 +102,7 @@
   }
 
   // 再生位置を保存（共通ロジック）
-  function savePositionCore(targetVideoId, options = {}) {
+  async function savePositionCore(targetVideoId, options = {}) {
     const { skipPauseCheck = false } = options;
 
     if (!isExtensionValid()) return;
@@ -128,10 +132,10 @@
     lastValidPosition = { videoId: targetVideoId, data: data };
 
     try {
-      chrome.storage.local.set({ [getStorageKey(targetVideoId)]: data });
+      await chrome.storage.local.set({ [getStorageKey(targetVideoId)]: data });
       console.log(`[YouTube再生位置保存] 保存: ${Math.floor(currentTime)}秒 / ${Math.floor(duration)}秒`);
     } catch (e) {
-      console.log('[YouTube再生位置保存] 保存失敗: 拡張機能が無効です');
+      console.warn('[YouTube再生位置保存] 保存失敗:', e.message || e);
     }
   }
 
@@ -154,7 +158,7 @@
       chrome.storage.local.set({ [getStorageKey(lastValidPosition.videoId)]: lastValidPosition.data });
       console.log(`[YouTube再生位置保存] 遷移時保存: ${Math.floor(lastValidPosition.data.position)}秒`);
     } catch (e) {
-      // 拡張機能が無効な場合は無視
+      console.warn('[YouTube再生位置保存] 遷移時保存失敗:', e.message || e);
     }
   }
 
@@ -216,8 +220,8 @@
         });
 
         // 復元完了、再生開始
-        video.play().catch(() => {
-          // 自動再生がブロックされた場合は無視
+        video.play().catch((e) => {
+          console.warn('[YouTube再生位置保存] 自動再生がブロックされました:', e.message || e);
         });
 
         // 復元中フラグを解除
@@ -230,7 +234,7 @@
       }
     } catch (e) {
       isRestoring = false;
-      // 拡張機能が無効な場合は無視
+      console.warn('[YouTube再生位置保存] 復元処理でエラー:', e.message || e);
     }
   }
 
@@ -358,18 +362,26 @@
     cleanupVideoCheckInterval();
 
     // 動画要素を待機してセットアップ
+    // クロージャでキャプチャし、コールバック実行時のコンテキスト混線を防止
+    const capturedVideoId = videoId;
     videoCheckIntervalId = setInterval(async () => {
       if (setupVideo()) {
         cleanupVideoCheckInterval();
 
+        // 遷移済みなら中断（急速連続遷移対策）
+        if (currentVideoId !== capturedVideoId) return;
+
         // 保存データがあるか事前にチェック
         let hasStoredPosition = false;
         try {
-          const result = await chrome.storage.local.get(getStorageKey(currentVideoId));
-          hasStoredPosition = !!(result[getStorageKey(currentVideoId)]?.position);
+          const result = await chrome.storage.local.get(getStorageKey(capturedVideoId));
+          hasStoredPosition = !!(result[getStorageKey(capturedVideoId)]?.position);
         } catch (e) {
-          // 無視
+          console.warn('[YouTube再生位置保存] 保存データ確認失敗:', e.message || e);
         }
+
+        // 遷移済みなら中断（async後の再チェック）
+        if (currentVideoId !== capturedVideoId) return;
 
         // 保存データがある場合は即座に一時停止（最初の数秒再生を防ぐ）
         if (hasStoredPosition) {
@@ -382,6 +394,8 @@
           startSaving();
         } else {
           video.addEventListener('loadedmetadata', async () => {
+            // loadedmetadata発火時に動画IDが変わっていたら復元しない
+            if (currentVideoId !== capturedVideoId) return;
             await restorePosition();
             startSaving();
           }, { once: true });
