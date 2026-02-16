@@ -175,10 +175,16 @@
 
   // 保存された再生位置を復元
   async function restorePosition() {
-    if (!video || !currentVideoId) return;
+    if (!video || !currentVideoId) {
+      isRestoring = false;
+      return;
+    }
 
     // ストレージからデータを取得（async/awaitで順序保証）
-    if (!isExtensionValid()) return;
+    if (!isExtensionValid()) {
+      isRestoring = false;
+      return;
+    }
 
     try {
       const result = await chrome.storage.local.get(getStorageKey(currentVideoId));
@@ -188,10 +194,11 @@
         // 動画の長さが変わっていないか確認
         if (video.duration && Math.abs(video.duration - data.duration) > DURATION_DIFF_THRESHOLD) {
           console.log(`[YouTube再生位置保存] 動画の長さが異なるため復元をスキップ`);
+          isRestoring = false;
           return;
         }
 
-        // 復元中フラグをセット
+        // 復元中フラグをセット（事前セット済みでも冪等）
         isRestoring = true;
 
         // 一時停止してから再生位置を復元（最初の数秒が再生されるのを防ぐ）
@@ -231,6 +238,9 @@
 
         // 復元完了を通知（トースト表示）
         showNotification(`${Math.floor(data.position)}秒から再開します`);
+      } else {
+        // 保存データがない場合はフラグを解除
+        isRestoring = false;
       }
     } catch (e) {
       isRestoring = false;
@@ -383,8 +393,10 @@
         // 遷移済みなら中断（async後の再チェック）
         if (currentVideoId !== capturedVideoId) return;
 
-        // 保存データがある場合は即座に一時停止（最初の数秒再生を防ぐ）
+        // 保存データがある場合は復元前の保存を抑止してから一時停止
+        // （pause イベントで現在位置=0付近が保存され、復元データを上書きするのを防ぐ）
         if (hasStoredPosition) {
+          isRestoring = true;
           video.pause();
         }
 

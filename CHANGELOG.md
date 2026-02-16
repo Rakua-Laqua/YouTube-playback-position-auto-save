@@ -1,5 +1,17 @@
 # YouTube 再生位置自動保存 - 更新履歴
 
+## [1.6.1] - 2026-02-16
+
+### 修正
+- **再生位置復元の競合修正**：再起動直後に `pause` イベント経由で 0秒付近が先に保存され、既存の保存位置を上書きしてしまうケースを修正
+- **既存タブ切替の権限修正**：`manifest.json` に `tabs` 権限を追加し、ポップアップからの同一動画タブ切替が正常動作するように修正
+
+### 変更
+- `background.js` の再注入処理を無効化し、バックアップコメントとして保持
+- `manifest.json` から `scripting` / `host_permissions` を削除し、必要最小権限へ整理
+
+---
+
 ## [1.6.0] - 2026-02-16
 
 ### 追加
@@ -17,17 +29,21 @@
 ## [1.5.0] - 2026-02-16
 
 ### 追加
-- **ブラウザ再起動対応**：Service Worker（`background.js`）を追加し、ブラウザ再起動時・拡張機能更新時に既存のYouTubeタブへ content script を自動再注入
+- **ブラウザ再起動対応**：Service Worker（`background.js`）を追加し、ブラウザ再起動時・拡張機能更新時に既存のYouTubeタブがアクティブになったタイミングで content script を自動再注入
 - `content.js` に多重注入防止ガード（`window.__ytPositionSaverLoaded`）を追加
+
+### 変更
+- `manifest.json` に `scripting` 権限と `background.service_worker` を追加
+
+---
+
+## [1.4.1] - 2026-02-16
 
 ### 改善
 - 例外処理の空 `catch` を `console.warn` に置換し、障害原因の追跡性を向上
 - `savePositionCore` を `async` 化し、`chrome.storage.local.set` を `await` で保存完了を保証
 - `loadedmetadata` コールバック内でクロージャ変数（`capturedVideoId`）を使用し、急速連続遷移時のコンテキスト混線を防止
 - `video.play()` 失敗時にエラー理由をログ出力するように変更
-
-### 変更
-- `manifest.json` に `scripting` 権限と `background.service_worker` を追加
 
 ---
 
@@ -114,10 +130,7 @@
 ### 使用 API
 - `chrome.storage.local` - 再生位置の保存
 - `chrome.runtime.id` - 拡張機能の有効性チェック
-- `chrome.scripting.executeScript` - 再起動時のスクリプト再注入
-- `chrome.runtime.onStartup` - ブラウザ起動検出
-- `chrome.runtime.onInstalled` - 拡張機能インストール/更新検出
-- `chrome.tabs.query` - 既存タブの取得
+- `chrome.tabs.query` - 既存YouTubeタブの検索（ポップアップ既存タブ切替）
 
 ### イベント
 - `yt-navigate-finish` - YouTube SPA ナビゲーション検出

@@ -108,7 +108,7 @@ MIT License
 
 ## バージョン
 
-現在のバージョン: **1.6.0**
+現在のバージョン: **1.6.1**
 
 詳細な更新履歴は [CHANGELOG.md](CHANGELOG.md) を参照してください。
 https://github.com/Rakua-Laqua/YouTube-playback-position-auto-save.git
