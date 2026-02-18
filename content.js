@@ -19,6 +19,7 @@
   const POPSTATE_INIT_DELAY_MS = 300; // popstate後の初期化遅延
   const SEEKED_TIMEOUT_MS = 3000; // seeked イベントのタイムアウト（ms）
   const SETTINGS_KEY = 'yt_position_settings'; // 設定用ストレージキー
+  const END_THRESHOLD_SEC = 3; // 動画終了判定の閾値（秒）
 
   let currentVideoId = null;
   let saveIntervalId = null;
@@ -26,6 +27,7 @@
   let video = null;
   let lastValidPosition = null; // 最後の有効な再生位置をメモリに保持
   let isRestoring = false; // 復元中フラグ（イベント競合防止）
+  let hasEnded = false; // 動画終了済みフラグ（ended後の再保存防止）
 
   // initの多重起動抑止
   let initTimerId = null;
@@ -48,6 +50,8 @@
 
   function handleTimeUpdate() {
     if (!currentVideoId || !video) return;
+    // 動画終了済みの場合は位置を更新しない
+    if (hasEnded) return;
 
     const currentTime = video.currentTime;
     const duration = video.duration;
@@ -70,10 +74,11 @@
   function handleEnded() {
     // 動画終了時は保存データを削除
     if (!isExtensionValid()) return;
+    hasEnded = true;
+    lastValidPosition = null;
     if (currentVideoId) {
       try {
         chrome.storage.local.remove(getStorageKey(currentVideoId));
-        lastValidPosition = null;
         console.log(`[YouTube再生位置保存] 動画終了: 保存データを削除`);
       } catch (e) {
         console.warn('[YouTube再生位置保存] 動画終了時の削除失敗:', e.message || e);
@@ -111,6 +116,9 @@
     // 復元中は保存しない
     if (isRestoring) return;
 
+    // 動画終了済みの場合は保存しない（ended後のSPA遷移で再保存されるのを防止）
+    if (hasEnded) return;
+
     // 一時停止中は保存しない（定期保存の重複防止、オプションでスキップ可能）
     if (!skipPauseCheck && video.paused) return;
 
@@ -120,6 +128,20 @@
     // 無効な値の場合は保存しない
     if (!duration || isNaN(duration) || duration < MIN_VALID_DURATION) return;
     if (isNaN(currentTime) || currentTime < MIN_SAVE_TIME) return;
+
+    // 動画の終わり付近（残り END_THRESHOLD_SEC 秒以内）の場合は保存データを削除
+    // （endedイベントが発火しないケースへの対策）
+    if (currentTime >= duration - END_THRESHOLD_SEC) {
+      hasEnded = true;
+      lastValidPosition = null;
+      try {
+        await chrome.storage.local.remove(getStorageKey(targetVideoId));
+        console.log(`[YouTube再生位置保存] 動画終了付近: 保存データを削除`);
+      } catch (e) {
+        console.warn('[YouTube再生位置保存] 動画終了付近の削除失敗:', e.message || e);
+      }
+      return;
+    }
 
     const data = {
       position: currentTime,
@@ -366,6 +388,7 @@
     }
 
     currentVideoId = videoId;
+    hasEnded = false; // 新しい動画への遷移時にリセット
     console.log(`[YouTube再生位置保存] 動画検出: ${videoId}`);
 
     // 前のインターバルをクリーンアップ
