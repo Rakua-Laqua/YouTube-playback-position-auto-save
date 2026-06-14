@@ -28,6 +28,7 @@
   let lastValidPosition = null; // 最後の有効な再生位置をメモリに保持
   let isRestoring = false; // 復元中フラグ（イベント競合防止）
   let hasEnded = false; // 動画終了済みフラグ（ended後の再保存防止）
+  let pausedForPendingRestore = false; // 復元準備で一時停止したかどうか
 
   // initの多重起動抑止
   let initTimerId = null;
@@ -56,8 +57,8 @@
     const currentTime = video.currentTime;
     const duration = video.duration;
 
-    if (!duration || isNaN(duration) || duration < MIN_VALID_DURATION) return;
-    if (isNaN(currentTime) || currentTime < MIN_SAVE_TIME) return;
+    if (!isRestorableCurrentVideo()) return;
+    if (!isValidPosition(currentTime)) return;
 
     // メモリに最新位置を保持
     lastValidPosition = {
@@ -106,6 +107,68 @@
     return STORAGE_KEY_PREFIX + videoId;
   }
 
+  function isValidDuration(duration) {
+    return Number.isFinite(duration) && duration >= MIN_VALID_DURATION;
+  }
+
+  function isValidPosition(position) {
+    return Number.isFinite(position) && position >= MIN_SAVE_TIME;
+  }
+
+  function isValidStoredPosition(data) {
+    return !!data && isValidPosition(data.position) && isValidDuration(data.duration);
+  }
+
+  function isActiveLiveVideo() {
+    const liveBroadcastDetails = window.ytInitialPlayerResponse?.microformat?.playerMicroformatRenderer?.liveBroadcastDetails;
+    return !!liveBroadcastDetails && !liveBroadcastDetails.endTimestamp;
+  }
+
+  function isRestorableCurrentVideo() {
+    return video && !isActiveLiveVideo() && isValidDuration(video.duration);
+  }
+
+  async function removeStoredPosition(videoId, reason) {
+    if (!videoId) return;
+
+    try {
+      await chrome.storage.local.remove(getStorageKey(videoId));
+      console.log(`[YouTube再生位置保存] ${reason}: 保存データを削除`);
+    } catch (e) {
+      console.warn(`[YouTube再生位置保存] ${reason}の削除失敗:`, e.message || e);
+    }
+  }
+
+  function pauseForRestore() {
+    if (!video) return;
+    if (!video.paused) {
+      pausedForPendingRestore = true;
+    }
+    video.pause();
+  }
+
+  function resumeIfPausedForRestore() {
+    const shouldResume = pausedForPendingRestore;
+    pausedForPendingRestore = false;
+
+    if (!shouldResume || !video || !video.paused) return;
+
+    video.play().catch((e) => {
+      console.warn('[YouTube再生位置保存] 復元スキップ後の再生再開がブロックされました:', e.message || e);
+    });
+  }
+
+  function finishRestore(options = {}) {
+    const { resumeIfPaused = false } = options;
+    isRestoring = false;
+
+    if (resumeIfPaused) {
+      resumeIfPausedForRestore();
+    } else {
+      pausedForPendingRestore = false;
+    }
+  }
+
   // 再生位置を保存（共通ロジック）
   async function savePositionCore(targetVideoId, options = {}) {
     const { skipPauseCheck = false } = options;
@@ -126,8 +189,8 @@
     const duration = video.duration;
 
     // 無効な値の場合は保存しない
-    if (!duration || isNaN(duration) || duration < MIN_VALID_DURATION) return;
-    if (isNaN(currentTime) || currentTime < MIN_SAVE_TIME) return;
+    if (!isRestorableCurrentVideo()) return;
+    if (!isValidPosition(currentTime)) return;
 
     // 動画の終わり付近（残り END_THRESHOLD_SEC 秒以内）の場合は保存データを削除
     // （endedイベントが発火しないケースへの対策）
@@ -198,13 +261,13 @@
   // 保存された再生位置を復元
   async function restorePosition() {
     if (!video || !currentVideoId) {
-      isRestoring = false;
+      finishRestore({ resumeIfPaused: true });
       return;
     }
 
     // ストレージからデータを取得（async/awaitで順序保証）
     if (!isExtensionValid()) {
-      isRestoring = false;
+      finishRestore({ resumeIfPaused: true });
       return;
     }
 
@@ -213,10 +276,22 @@
       const data = result[getStorageKey(currentVideoId)];
 
       if (data && data.position) {
+        if (!isValidStoredPosition(data)) {
+          await removeStoredPosition(currentVideoId, '無効な保存データ');
+          finishRestore({ resumeIfPaused: true });
+          return;
+        }
+
+        if (!isRestorableCurrentVideo()) {
+          await removeStoredPosition(currentVideoId, 'ライブ配信または無効な動画長');
+          finishRestore({ resumeIfPaused: true });
+          return;
+        }
+
         // 動画の長さが変わっていないか確認
-        if (video.duration && Math.abs(video.duration - data.duration) > DURATION_DIFF_THRESHOLD) {
+        if (Math.abs(video.duration - data.duration) > DURATION_DIFF_THRESHOLD) {
           console.log(`[YouTube再生位置保存] 動画の長さが異なるため復元をスキップ`);
-          isRestoring = false;
+          finishRestore({ resumeIfPaused: true });
           return;
         }
 
@@ -224,7 +299,7 @@
         isRestoring = true;
 
         // 一時停止してから再生位置を復元（最初の数秒が再生されるのを防ぐ）
-        video.pause();
+        pauseForRestore();
         video.currentTime = data.position;
 
         // シークが完了したら再生を再開（タイムアウト付き）
@@ -254,7 +329,7 @@
         });
 
         // 復元中フラグを解除
-        isRestoring = false;
+        finishRestore();
 
         console.log(`[YouTube再生位置保存] 復元: ${Math.floor(data.position)}秒から再開`);
 
@@ -262,10 +337,10 @@
         showNotification(`${Math.floor(data.position)}秒から再開します`);
       } else {
         // 保存データがない場合はフラグを解除
-        isRestoring = false;
+        finishRestore({ resumeIfPaused: true });
       }
     } catch (e) {
-      isRestoring = false;
+      finishRestore({ resumeIfPaused: true });
       console.warn('[YouTube再生位置保存] 復元処理でエラー:', e.message || e);
     }
   }
@@ -404,11 +479,11 @@
         // 遷移済みなら中断（急速連続遷移対策）
         if (currentVideoId !== capturedVideoId) return;
 
-        // 保存データがあるか事前にチェック
-        let hasStoredPosition = false;
+        // 復元可能な保存データがあるか事前にチェック
+        let hasRestorableStoredPosition = false;
         try {
           const result = await chrome.storage.local.get(getStorageKey(capturedVideoId));
-          hasStoredPosition = !!(result[getStorageKey(capturedVideoId)]?.position);
+          hasRestorableStoredPosition = isValidStoredPosition(result[getStorageKey(capturedVideoId)]) && !isActiveLiveVideo();
         } catch (e) {
           console.warn('[YouTube再生位置保存] 保存データ確認失敗:', e.message || e);
         }
@@ -416,11 +491,11 @@
         // 遷移済みなら中断（async後の再チェック）
         if (currentVideoId !== capturedVideoId) return;
 
-        // 保存データがある場合は復元前の保存を抑止してから一時停止
+        // 復元可能な保存データがある場合は復元前の保存を抑止してから一時停止
         // （pause イベントで現在位置=0付近が保存され、復元データを上書きするのを防ぐ）
-        if (hasStoredPosition) {
+        if (hasRestorableStoredPosition) {
           isRestoring = true;
-          video.pause();
+          pauseForRestore();
         }
 
         // 動画のメタデータが読み込まれたら復元
