@@ -6,6 +6,9 @@
   if (window.__ytPositionSaverLoaded) return;
   window.__ytPositionSaverLoaded = true;
 
+  // 起動マーカー（読み込まれているコードのバージョン確認用）
+  console.log('[YouTube再生位置保存] 起動 v1.6.5');
+
   // 定数
   const STORAGE_KEY_PREFIX = 'yt_position_';
   const SAVE_INTERVAL_MS = 5000; // 5秒ごとに保存
@@ -30,6 +33,7 @@
   let hasEnded = false; // 動画終了済みフラグ（ended後の再保存防止）
   let pausedForPendingRestore = false; // 復元準備で一時停止したかどうか
   let isLiveCached = false; // 配信中ライブかのキャッシュ（timeupdate毎のDOM計測を避ける）
+  let liveCleanupDone = false; // ライブ検出時の古い保存データ削除を一度だけ行うフラグ
 
   // initの多重起動抑止
   let initTimerId = null;
@@ -133,17 +137,58 @@
     return !rect || rect.width > 0 || rect.height > 0;
   }
 
-  // 配信中ライブかどうかを DOM から判定する。
-  // content script は isolated world で動くため window.ytInitialPlayerResponse は読めない。
-  // 配信中ライブのときだけプレイヤーの「ライブ」バッジ（.ytp-live-badge）が可視になり、
-  // 通常VOD・アーカイブ（配信終了後）では display:none になることを利用する。
+  function getLiveStatusFromMainWorld(videoId) {
+    return new Promise((resolve) => {
+      const script = document.createElement('script');
+
+      const listener = (event) => {
+        if (event.source !== window || !event.data || event.data.type !== 'YtPosSaver_LiveInfo_Response') return;
+        window.removeEventListener('message', listener);
+        script.remove();
+        console.log('[YouTube再生位置保存-Isolated] MainWorldからの返答:', event.data);
+        if (event.data.error || !event.data.videoId || event.data.videoId !== videoId) {
+          resolve(null); // エラーまたは動画ID不一致の場合は判定不能（null）として扱う
+        } else {
+          resolve(event.data.isLive);
+        }
+      };
+
+      window.addEventListener('message', listener);
+
+      script.src = chrome.runtime.getURL('main_world.js');
+      document.documentElement.appendChild(script);
+
+      // フォールバック用のタイムアウト
+      setTimeout(() => {
+        window.removeEventListener('message', listener);
+        script.remove();
+        console.log('[YouTube再生位置保存-Isolated] MainWorldからの応答がタイムアウトしました');
+        resolve(null);
+      }, 1000); // 念のためタイムアウトを1000msに延長
+    });
+  }
+
+  // 配信中ライブかどうかを判定する。
   // ※DVR有効ライブは video.duration が有限値になるため duration だけでは判別できず、この判定が必須。
   function detectActiveLiveFromDom() {
+    // DOMのUIシグナルから判定
+    // ・経過時間表示に .ytp-live クラスが付く（クラス判定＝リフロー不要・比較的早期に付与される）
+    // ・プレイヤーの「ライブ」バッジが可視（VOD・アーカイブでは display:none）
+    const timeDisplay = document.querySelector('.ytp-time-display');
+    if (timeDisplay && timeDisplay.classList.contains('ytp-live')) return true;
+
     return isVisibleElement(document.querySelector('.ytp-live-badge'));
   }
 
-  // ライブ判定を再評価してキャッシュを更新する（DOM 計測はここでのみ行う）
+  // ライブ判定を再評価してキャッシュを更新する（DOM 計測はここでのみ行う）。
+  // 一度ライブと判定したら、その動画セッションの間は維持する（sticky-for-true）。
+  // 理由：YouTubeプレイヤーはユーザ操作後にコントロールバー（バッジ含む）を
+  // 自動非表示するため、ライブ視聴中でも DOM 上の可視シグナルが一時的に消える。
+  // 再生中に「ライブ→VOD」（あるいは逆）に変わることは無いので、true を維持して
+  // 「コントロール非表示→誤ってVOD扱い→保存→次回 livehead から大きく後ろに復元→停止」
+  // という連鎖故障を防ぐ。
   function updateLiveStatus() {
+    if (isLiveCached) return true;
     isLiveCached = detectActiveLiveFromDom();
     return isLiveCached;
   }
@@ -151,6 +196,60 @@
   // 配信中ライブか（キャッシュ参照。timeupdate などのホットパスから安全に呼べる）
   function isActiveLiveVideo() {
     return isLiveCached;
+  }
+
+  // プレイヤーのコントロールUI（時刻表示）が描画済みか。
+  // これが現れて初めて detectActiveLiveFromDom の結果が信頼できる
+  // （読込直後は video 要素だけ先に使えるようになり、ライブバッジ／時刻表示の
+  //   描画は少し遅れるため、早すぎる判定はライブを取りこぼす）。
+  function isPlayerChromeReady() {
+    return !!document.querySelector('.ytp-time-display');
+  }
+
+  // ライブ判定を「信頼できるタイミング」まで待ってから確定する。
+  // 読込直後は video 要素が先に使えるようになり、ライブバッジ／時刻表示の描画が
+  // 遅れることがある。その隙にライブを「非ライブ」と誤判定して一時停止すると、
+  // ライブ配信が「一瞬再生→停止」のまま取り残される（本不具合の根本原因）。
+  // これを防ぐため復元判定の直前にだけ呼び、次のいずれかで確定する：
+  // ・ライブを積極的に検出できたら即座に true
+  // ・プレイヤーUIが描画され、少し待っても非ライブのままなら false（＝VOD確定）
+  // ・想定外に長引いた場合はタイムアウトして最終判定
+  // いずれの経路でも isLiveCached を最新化するので、呼び出し後は isActiveLiveVideo() が使える。
+  async function resolveLiveStatus({ maxWaitMs = 2500, settleMs = 150 } = {}) {
+    console.log('[YouTube再生位置保存] resolveLiveStatus開始');
+    // 1. まず Main World の ytInitialPlayerResponse から確実なライブ情報を非同期取得してみる
+    // これが最も正確で、パース失敗や DOMの遅延による誤判定の影響を受けない
+    const isLiveFromMain = await getLiveStatusFromMainWorld(currentVideoId);
+    console.log('[YouTube再生位置保存] getLiveStatusFromMainWorldの結果:', isLiveFromMain);
+    if (isLiveFromMain === true) {
+      isLiveCached = true;
+      return true;
+    } else if (isLiveFromMain === false) {
+      return false; // VOD確定（動画IDが一致し、isLiveContentが false であることが明確）
+    }
+
+    console.log('[YouTube再生位置保存] DOMUIシグナルによるフォールバック判定を開始');
+    // 2. DOMUIシグナルによる判定（SPA遷移後などで Main World から情報が得られなかった場合のフォールバック）
+    const start = Date.now();
+    let chromeReadyAt = null;
+    while (Date.now() - start < maxWaitMs) {
+      if (updateLiveStatus()) {
+        console.log('[YouTube再生位置保存] DOM判定でライブ確定');
+        return true; // 積極的にライブ検出できた → 確定
+      }
+      if (isPlayerChromeReady()) {
+        if (chromeReadyAt === null) chromeReadyAt = Date.now();
+        // UI描画直後はライブ用クラス付与が一瞬遅れる場合に備え、ごく短く待ってから確定
+        if (Date.now() - chromeReadyAt >= settleMs) {
+          console.log('[YouTube再生位置保存] DOM判定でVOD確定 (settleMs経過)');
+          return false; // VOD確定
+        }
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    const finalStatus = updateLiveStatus();
+    console.log('[YouTube再生位置保存] DOM判定タイムアウトによる最終判定:', finalStatus);
+    return finalStatus; // フォールバック（最終判定）
   }
 
   function isRestorableCurrentVideo() {
@@ -170,9 +269,10 @@
 
   function pauseForRestore() {
     if (!video) return;
-    if (!video.paused) {
-      pausedForPendingRestore = true;
-    }
+    // 拡張側が復元目的で一時停止したものは、復元をスキップした場合に必ず再生へ戻す。
+    // ライブ等で読み込み直後にまだ自動再生が始まっておらず video.paused===true でも、
+    // 取り残して「一時停止のまま」になるのを防ぐため、常に再開対象として記録する。
+    pausedForPendingRestore = true;
     video.pause();
   }
 
@@ -257,6 +357,17 @@
   function savePosition() {
     // 定期的にライブ判定を最新化（timeupdate / 各保存はこのキャッシュを参照する）
     updateLiveStatus();
+
+    if (isActiveLiveVideo()) {
+      // ライブは保存対象外。旧バージョンが保存した古いデータが残っていると
+      // 再読み込み時に不要な復元処理（一時停止）が走るため、検出時に一度だけ削除する。
+      if (!liveCleanupDone && currentVideoId) {
+        liveCleanupDone = true;
+        removeStoredPosition(currentVideoId, 'ライブ検出により古い保存データを削除');
+      }
+      return;
+    }
+
     savePositionCore(currentVideoId, { skipPauseCheck: false });
   }
 
@@ -313,8 +424,9 @@
           return;
         }
 
-        // ライブ判定を最新化してから復元可否を判定
-        updateLiveStatus();
+        // ライブ判定が信頼できるタイミングまで待ってから復元可否を判定する。
+        // （読込直後にUI未描画でライブを誤判定し、一時停止で取り残すのを防ぐ）
+        await resolveLiveStatus();
         if (!isRestorableCurrentVideo()) {
           await removeStoredPosition(currentVideoId, 'ライブ配信または無効な動画長');
           finishRestore({ resumeIfPaused: true });
@@ -498,6 +610,7 @@
     currentVideoId = videoId;
     hasEnded = false; // 新しい動画への遷移時にリセット
     isLiveCached = false; // 前の動画のライブ判定を引き継がない（既定は復元対象＝非ライブ）
+    liveCleanupDone = false;
     console.log(`[YouTube再生位置保存] 動画検出: ${videoId}`);
 
     // 前のインターバルをクリーンアップ
@@ -513,38 +626,40 @@
         // 遷移済みなら中断（急速連続遷移対策）
         if (currentVideoId !== capturedVideoId) return;
 
-        // ライブ判定を最新化（プレイヤーの「ライブ」バッジの可視状態で判定）
-        updateLiveStatus();
+        // メタデータ読み込み後に実行する共通処理
+        const processRestoreAndStartSaving = async () => {
+          if (currentVideoId !== capturedVideoId) return;
 
-        // 復元可能な保存データがあるか事前にチェック
-        let hasRestorableStoredPosition = false;
-        try {
-          const result = await chrome.storage.local.get(getStorageKey(capturedVideoId));
-          hasRestorableStoredPosition = isValidStoredPosition(result[getStorageKey(capturedVideoId)]) && !isActiveLiveVideo();
-        } catch (e) {
-          console.warn('[YouTube再生位置保存] 保存データ確認失敗:', e.message || e);
-        }
+          // ライブ判定を最新化（動画のメタデータが読み込まれ、UIが構築され始めるのを待ってから判定）
+          await resolveLiveStatus();
 
-        // 遷移済みなら中断（async後の再チェック）
-        if (currentVideoId !== capturedVideoId) return;
+          // 復元可能な保存データがあるか事前にチェック
+          let hasRestorableStoredPosition = false;
+          try {
+            const result = await chrome.storage.local.get(getStorageKey(capturedVideoId));
+            hasRestorableStoredPosition = isValidStoredPosition(result[getStorageKey(capturedVideoId)]) && !isActiveLiveVideo();
+          } catch (e) {
+            console.warn('[YouTube再生位置保存] 保存データ確認失敗:', e.message || e);
+          }
 
-        // 復元可能な保存データがある場合は復元前の保存を抑止してから一時停止
-        // （pause イベントで現在位置=0付近が保存され、復元データを上書きするのを防ぐ）
-        if (hasRestorableStoredPosition) {
-          isRestoring = true;
-          pauseForRestore();
-        }
+          // 遷移済みなら中断（async後の再チェック）
+          if (currentVideoId !== capturedVideoId) return;
 
-        // 動画のメタデータが読み込まれたら復元
-        if (video.readyState >= 1) {
-          await restorePosition();
+          // 復元可能な保存データがある場合は復元前の保存を抑止する（isRestoring=true）。
+          // 実際の一時停止は restorePosition がシーク直前にのみ行う。
+          if (hasRestorableStoredPosition) {
+            isRestoring = true;
+            await restorePosition();
+          }
           startSaving();
+        };
+
+        // 動画のメタデータが読み込まれてから判定と復元を行う
+        if (video.readyState >= 1) {
+          await processRestoreAndStartSaving();
         } else {
           video.addEventListener('loadedmetadata', async () => {
-            // loadedmetadata発火時に動画IDが変わっていたら復元しない
-            if (currentVideoId !== capturedVideoId) return;
-            await restorePosition();
-            startSaving();
+            await processRestoreAndStartSaving();
           }, { once: true });
         }
       }
