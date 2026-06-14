@@ -1,4 +1,4 @@
-# YouTube 再生位置自動保存 v1.6.3
+# YouTube 再生位置自動保存 v1.6.4
 
 YouTubeの動画再生位置をローカルに自動保存し、次回アクセス時に前回の続きから再開できるChrome拡張機能です。
 
@@ -108,7 +108,7 @@ MIT License
 
 ## バージョン
 
-現在のバージョン: **1.6.3**
+現在のバージョン: **1.6.4**
 
 詳細な更新履歴は [CHANGELOG.md](CHANGELOG.md) を参照してください。
 https://github.com/Rakua-Laqua/YouTube-playback-position-auto-save.git

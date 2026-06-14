@@ -29,6 +29,7 @@
   let isRestoring = false; // 復元中フラグ（イベント競合防止）
   let hasEnded = false; // 動画終了済みフラグ（ended後の再保存防止）
   let pausedForPendingRestore = false; // 復元準備で一時停止したかどうか
+  let isLiveCached = false; // 配信中ライブかのキャッシュ（timeupdate毎のDOM計測を避ける）
 
   // initの多重起動抑止
   let initTimerId = null;
@@ -119,9 +120,37 @@
     return !!data && isValidPosition(data.position) && isValidDuration(data.duration);
   }
 
+  // 要素が実際に表示されているか（display:none / 非表示 / サイズ0 を除外）
+  function isVisibleElement(element) {
+    if (!element) return false;
+
+    const style = window.getComputedStyle?.(element);
+    if (style && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) {
+      return false;
+    }
+
+    const rect = element.getBoundingClientRect?.();
+    return !rect || rect.width > 0 || rect.height > 0;
+  }
+
+  // 配信中ライブかどうかを DOM から判定する。
+  // content script は isolated world で動くため window.ytInitialPlayerResponse は読めない。
+  // 配信中ライブのときだけプレイヤーの「ライブ」バッジ（.ytp-live-badge）が可視になり、
+  // 通常VOD・アーカイブ（配信終了後）では display:none になることを利用する。
+  // ※DVR有効ライブは video.duration が有限値になるため duration だけでは判別できず、この判定が必須。
+  function detectActiveLiveFromDom() {
+    return isVisibleElement(document.querySelector('.ytp-live-badge'));
+  }
+
+  // ライブ判定を再評価してキャッシュを更新する（DOM 計測はここでのみ行う）
+  function updateLiveStatus() {
+    isLiveCached = detectActiveLiveFromDom();
+    return isLiveCached;
+  }
+
+  // 配信中ライブか（キャッシュ参照。timeupdate などのホットパスから安全に呼べる）
   function isActiveLiveVideo() {
-    const liveBroadcastDetails = window.ytInitialPlayerResponse?.microformat?.playerMicroformatRenderer?.liveBroadcastDetails;
-    return !!liveBroadcastDetails && !liveBroadcastDetails.endTimestamp;
+    return isLiveCached;
   }
 
   function isRestorableCurrentVideo() {
@@ -226,6 +255,8 @@
 
   // 再生位置を保存（定期保存用）
   function savePosition() {
+    // 定期的にライブ判定を最新化（timeupdate / 各保存はこのキャッシュを参照する）
+    updateLiveStatus();
     savePositionCore(currentVideoId, { skipPauseCheck: false });
   }
 
@@ -282,6 +313,8 @@
           return;
         }
 
+        // ライブ判定を最新化してから復元可否を判定
+        updateLiveStatus();
         if (!isRestorableCurrentVideo()) {
           await removeStoredPosition(currentVideoId, 'ライブ配信または無効な動画長');
           finishRestore({ resumeIfPaused: true });
@@ -464,6 +497,7 @@
 
     currentVideoId = videoId;
     hasEnded = false; // 新しい動画への遷移時にリセット
+    isLiveCached = false; // 前の動画のライブ判定を引き継がない（既定は復元対象＝非ライブ）
     console.log(`[YouTube再生位置保存] 動画検出: ${videoId}`);
 
     // 前のインターバルをクリーンアップ
@@ -478,6 +512,9 @@
 
         // 遷移済みなら中断（急速連続遷移対策）
         if (currentVideoId !== capturedVideoId) return;
+
+        // ライブ判定を最新化（プレイヤーの「ライブ」バッジの可視状態で判定）
+        updateLiveStatus();
 
         // 復元可能な保存データがあるか事前にチェック
         let hasRestorableStoredPosition = false;
