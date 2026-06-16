@@ -88,9 +88,10 @@ YouTube の視聴履歴を残さない設定で使っている場合でも、再
 
 - `storage`: 再生位置と設定をブラウザ内に保存するため
 - `tabs`: ポップアップから同じ動画の既存 YouTube タブを探して切り替えるため
-- `https://www.youtube.com/*`: YouTube ページ上で `content.js` を動作させるため
+- `scripting`: 拡張機能の更新・再読み込み後に、既存の YouTube タブへ `content.js` を再注入するため
+- `https://www.youtube.com/*`: YouTube ページ上で `content.js` を動作させ、既存タブへの再注入を許可するため
 
-`background.js` には過去の再注入処理がバックアップコメントとして残っていますが、現在の通常動作では `manifest.json` の `content_scripts` による自動注入を使用しています。
+通常のページ読み込みでは `manifest.json` の `content_scripts` による自動注入を使用します。既に開いている YouTube タブに対しては、`background.js` が拡張機能の更新・再読み込み・ブラウザ起動・タブのアクティブ化時に再注入を試みます。
 
 ## 仕様（主要な定数）
 

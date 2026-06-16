@@ -2,9 +2,23 @@
 (function () {
   'use strict';
 
-  // 多重注入防止（SW による再注入時に二重起動しない）
-  if (window.__ytPositionSaverLoaded) return;
-  window.__ytPositionSaverLoaded = true;
+  const CONTENT_SCRIPT_VERSION = '1.7.0-reinject-20260616';
+  const existingController = window.__ytPositionSaverController;
+
+  if (existingController?.version === CONTENT_SCRIPT_VERSION) {
+    existingController.scheduleInit?.();
+    return;
+  }
+
+  existingController?.cleanup?.();
+
+  const controller = {
+    version: CONTENT_SCRIPT_VERSION,
+    cleanup: null,
+    scheduleInit: null
+  };
+  window.__ytPositionSaverController = controller;
+  window.__ytPositionSaverLoaded = CONTENT_SCRIPT_VERSION;
 
   // 定数
   const STORAGE_KEY_PREFIX = 'yt_position_';
@@ -20,6 +34,14 @@
   const SEEKED_TIMEOUT_MS = 3000; // seeked イベントのタイムアウト（ms）
   const SETTINGS_KEY = 'yt_position_settings'; // 設定用ストレージキー
   const END_THRESHOLD_SEC = 3; // 動画終了判定の閾値（秒）
+  const DEFAULT_SETTINGS = {
+    enabled: true,
+    notifyOnRestore: true,
+    autoPlayOnRestore: true,
+    minSaveSeconds: 0,
+    autoCleanupDays: 0,
+    openVideoMode: 'existing'
+  };
 
   let currentVideoId = null;
   let saveIntervalId = null;
@@ -30,6 +52,7 @@
   let hasEnded = false; // 動画終了済みフラグ（ended後の再保存防止）
   let pausedForPendingRestore = false; // 復元準備で一時停止したかどうか
   let isLiveCached = false; // 配信中ライブかのキャッシュ（timeupdate毎のDOM計測を避ける）
+  let settingsCache = { ...DEFAULT_SETTINGS };
 
   // initの多重起動抑止
   let initTimerId = null;
@@ -60,6 +83,7 @@
 
     if (!isRestorableCurrentVideo()) return;
     if (!isValidPosition(currentTime)) return;
+    if (!isPastMinimumSaveTime(currentTime)) return;
 
     // メモリに最新位置を保持
     lastValidPosition = {
@@ -114,6 +138,11 @@
 
   function isValidPosition(position) {
     return Number.isFinite(position) && position >= MIN_SAVE_TIME;
+  }
+
+  function isPastMinimumSaveTime(position) {
+    const minSaveSeconds = Number(settingsCache.minSaveSeconds) || 0;
+    return position >= minSaveSeconds;
   }
 
   function isValidStoredPosition(data) {
@@ -220,6 +249,7 @@
     // 無効な値の場合は保存しない
     if (!isRestorableCurrentVideo()) return;
     if (!isValidPosition(currentTime)) return;
+    if (!isPastMinimumSaveTime(currentTime)) return;
 
     // 動画の終わり付近（残り END_THRESHOLD_SEC 秒以内）の場合は保存データを削除
     // （endedイベントが発火しないケースへの対策）
@@ -356,10 +386,12 @@
           }, SEEKED_TIMEOUT_MS);
         });
 
-        // 復元完了、再生開始
-        video.play().catch((e) => {
-          console.warn('[YouTube再生位置保存] 自動再生がブロックされました:', e.message || e);
-        });
+        // 復元完了、設定に応じて再生開始
+        if (settingsCache.autoPlayOnRestore) {
+          video.play().catch((e) => {
+            console.warn('[YouTube再生位置保存] 自動再生がブロックされました:', e.message || e);
+          });
+        }
 
         // 復元中フラグを解除
         finishRestore();
@@ -367,7 +399,10 @@
         console.log(`[YouTube再生位置保存] 復元: ${Math.floor(data.position)}秒から再開`);
 
         // 復元完了を通知（トースト表示）
-        showNotification(`${Math.floor(data.position)}秒から再開します`);
+        if (settingsCache.notifyOnRestore) {
+          const messageTemplate = chrome.i18n.getMessage('notificationResumeAt') || '{position}秒から再開します';
+          showNotification(messageTemplate.replace('{position}', Math.floor(data.position)));
+        }
       } else {
         // 保存データがない場合はフラグを解除
         finishRestore({ resumeIfPaused: true });
@@ -457,15 +492,21 @@
     return true;
   }
 
-  // 設定の有効/無効をチェック
-  async function isEnabled() {
+  // 設定を読み込み
+  async function loadSettings() {
     try {
       const result = await chrome.storage.local.get(SETTINGS_KEY);
-      const settings = result[SETTINGS_KEY];
-      return !settings || settings.enabled !== false;
+      settingsCache = { ...DEFAULT_SETTINGS, ...(result[SETTINGS_KEY] || {}) };
     } catch (e) {
-      return true; // 取得失敗時はデフォルト有効
+      settingsCache = { ...DEFAULT_SETTINGS };
     }
+    return settingsCache;
+  }
+
+  // 設定の有効/無効をチェック
+  async function isEnabled() {
+    const settings = await loadSettings();
+    return settings.enabled !== false;
   }
 
   // メイン処理
@@ -554,23 +595,17 @@
     setTimeout(() => cleanupVideoCheckInterval(), VIDEO_CHECK_TIMEOUT_MS);
   }
 
-  // ページ離脱時に保存
-  window.addEventListener('beforeunload', () => {
+  function handleBeforeUnload() {
     saveForNavigation();
-  });
+  }
 
-  // 初期化
-  scheduleInit(0);
-
-  // YouTubeのナビゲーションイベントを使用（MutationObserverより効率的）
-  window.addEventListener('yt-navigate-finish', () => {
+  function handleYtNavigateFinish() {
     lastNavigateFinishAt = Date.now();
     saveForNavigation();
     scheduleInit(0);
-  });
+  }
 
-  // popstate（戻る/進むボタン）でも動作
-  window.addEventListener('popstate', () => {
+  function handlePopState() {
     saveForNavigation();
 
     // yt-navigate-finish直後のpopstateは二重初期化になりやすいので抑止
@@ -578,13 +613,67 @@
     if (now - lastNavigateFinishAt < 250) return;
 
     scheduleInit(POPSTATE_INIT_DELAY_MS);
-  });
+  }
 
-  // visibilitychange（タブ切り替え時）に保存
-  document.addEventListener('visibilitychange', () => {
+  function handleVisibilityChange() {
     if (document.hidden) {
       saveForNavigation();
     }
-  });
+  }
+
+  function handleSettingsChanged(changes, areaName) {
+    if (areaName !== 'local' || !changes[SETTINGS_KEY]) return;
+
+    settingsCache = { ...DEFAULT_SETTINGS, ...(changes[SETTINGS_KEY].newValue || {}) };
+
+    if (settingsCache.enabled === false) {
+      stopSaving();
+      currentVideoId = null;
+      return;
+    }
+
+    scheduleInit(0);
+  }
+
+  function cleanupContentScript() {
+    if (initTimerId) {
+      clearTimeout(initTimerId);
+      initTimerId = null;
+    }
+    stopSaving();
+    cleanupVideoCheckInterval();
+    cleanupVideoListeners();
+
+    window.removeEventListener('beforeunload', handleBeforeUnload);
+    window.removeEventListener('yt-navigate-finish', handleYtNavigateFinish);
+    window.removeEventListener('popstate', handlePopState);
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
+
+    try {
+      chrome.storage.onChanged.removeListener(handleSettingsChanged);
+    } catch (e) {
+      // 拡張コンテキスト破棄後のクリーンアップでは失敗することがある。
+    }
+  }
+
+  controller.cleanup = cleanupContentScript;
+  controller.scheduleInit = () => scheduleInit(0);
+
+  // ページ離脱時に保存
+  window.addEventListener('beforeunload', handleBeforeUnload);
+
+  // YouTubeのナビゲーションイベントを使用（MutationObserverより効率的）
+  window.addEventListener('yt-navigate-finish', handleYtNavigateFinish);
+
+  // popstate（戻る/進むボタン）でも動作
+  window.addEventListener('popstate', handlePopState);
+
+  // visibilitychange（タブ切り替え時）に保存
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+
+  chrome.storage.onChanged.addListener(handleSettingsChanged);
+
+  // 初期化
+  scheduleInit(0);
 
 })();

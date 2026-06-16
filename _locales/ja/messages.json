@@ -68,5 +68,125 @@
   "popupSearchPlaceholder": {
     "message": "タイトルまたは動画IDで検索",
     "description": "検索バーのプレースホルダー"
+  },
+  "settingsOpen": {
+    "message": "設定",
+    "description": "設定画面を開くボタン"
+  },
+  "settingsBack": {
+    "message": "戻る",
+    "description": "メイン画面へ戻るボタン"
+  },
+  "settingsTitle": {
+    "message": "設定",
+    "description": "設定画面のタイトル"
+  },
+  "settingsSectionRestore": {
+    "message": "保存と復元",
+    "description": "保存と復元設定セクション"
+  },
+  "settingsNotifyOnRestore": {
+    "message": "復元時に通知を表示",
+    "description": "復元通知設定"
+  },
+  "settingsNotifyOnRestoreDesc": {
+    "message": "保存位置へ移動したときにトースト通知を出します",
+    "description": "復元通知設定の説明"
+  },
+  "settingsAutoPlayOnRestore": {
+    "message": "復元後に自動再生",
+    "description": "復元後の自動再生設定"
+  },
+  "settingsAutoPlayOnRestoreDesc": {
+    "message": "オフの場合は保存位置で一時停止したままにします",
+    "description": "復元後の自動再生設定の説明"
+  },
+  "settingsMinSaveSeconds": {
+    "message": "短時間だけ見た動画を保存しない",
+    "description": "最小保存秒数設定"
+  },
+  "settingsMinSaveSecondsDesc": {
+    "message": "指定秒数未満の再生位置は保存しません",
+    "description": "最小保存秒数設定の説明"
+  },
+  "settingsMinSaveNever": {
+    "message": "制限なし",
+    "description": "最小保存秒数なし"
+  },
+  "settingsSeconds10": {
+    "message": "10秒未満",
+    "description": "10秒オプション"
+  },
+  "settingsSeconds30": {
+    "message": "30秒未満",
+    "description": "30秒オプション"
+  },
+  "settingsMinute1": {
+    "message": "1分未満",
+    "description": "1分オプション"
+  },
+  "settingsSectionData": {
+    "message": "一覧とデータ",
+    "description": "一覧とデータ設定セクション"
+  },
+  "settingsAutoCleanupDays": {
+    "message": "古い保存データを自動削除",
+    "description": "古いデータ削除設定"
+  },
+  "settingsAutoCleanupDaysDesc": {
+    "message": "ポップアップを開いたときに古いデータを整理します",
+    "description": "古いデータ削除設定の説明"
+  },
+  "settingsCleanupNever": {
+    "message": "しない",
+    "description": "自動削除なし"
+  },
+  "settingsDays30": {
+    "message": "30日",
+    "description": "30日オプション"
+  },
+  "settingsDays90": {
+    "message": "90日",
+    "description": "90日オプション"
+  },
+  "settingsDays180": {
+    "message": "180日",
+    "description": "180日オプション"
+  },
+  "settingsOpenVideoMode": {
+    "message": "動画を開く方法",
+    "description": "動画を開く方法設定"
+  },
+  "settingsOpenVideoModeDesc": {
+    "message": "一覧から動画を開くときのタブ動作を選べます",
+    "description": "動画を開く方法設定の説明"
+  },
+  "settingsOpenExisting": {
+    "message": "既存タブを優先",
+    "description": "既存タブ優先オプション"
+  },
+  "settingsOpenNew": {
+    "message": "常に新しいタブ",
+    "description": "新規タブオプション"
+  },
+  "settingsSectionManage": {
+    "message": "データ管理",
+    "description": "データ管理セクション"
+  },
+  "settingsExport": {
+    "message": "エクスポート",
+    "description": "保存データのエクスポート"
+  },
+  "settingsImport": {
+    "message": "インポート",
+    "description": "保存データのインポート"
+  },
+  "settingsImportConfirm": {
+    "message": "保存データをインポートしますか？ 同じ動画IDのデータは上書きされます。",
+    "description": "インポート確認"
+  },
+  "settingsImportError": {
+    "message": "インポートできませんでした。JSONファイルの内容を確認してください。",
+    "description": "インポート失敗メッセージ"
   }
 }

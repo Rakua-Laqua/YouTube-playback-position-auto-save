@@ -68,5 +68,125 @@
   "popupSearchPlaceholder": {
     "message": "Search by title or video ID",
     "description": "Search bar placeholder"
+  },
+  "settingsOpen": {
+    "message": "Settings",
+    "description": "Open settings button"
+  },
+  "settingsBack": {
+    "message": "Back",
+    "description": "Back to main view button"
+  },
+  "settingsTitle": {
+    "message": "Settings",
+    "description": "Settings view title"
+  },
+  "settingsSectionRestore": {
+    "message": "Save and Restore",
+    "description": "Save and restore settings section"
+  },
+  "settingsNotifyOnRestore": {
+    "message": "Show restore notification",
+    "description": "Restore notification setting"
+  },
+  "settingsNotifyOnRestoreDesc": {
+    "message": "Shows a toast when the saved position is restored",
+    "description": "Restore notification setting description"
+  },
+  "settingsAutoPlayOnRestore": {
+    "message": "Autoplay after restore",
+    "description": "Autoplay after restore setting"
+  },
+  "settingsAutoPlayOnRestoreDesc": {
+    "message": "When off, the video stays paused at the saved position",
+    "description": "Autoplay after restore setting description"
+  },
+  "settingsMinSaveSeconds": {
+    "message": "Ignore brief watches",
+    "description": "Minimum save seconds setting"
+  },
+  "settingsMinSaveSecondsDesc": {
+    "message": "Positions before the selected time are not saved",
+    "description": "Minimum save seconds setting description"
+  },
+  "settingsMinSaveNever": {
+    "message": "No limit",
+    "description": "No minimum save time"
+  },
+  "settingsSeconds10": {
+    "message": "Under 10 sec",
+    "description": "10 seconds option"
+  },
+  "settingsSeconds30": {
+    "message": "Under 30 sec",
+    "description": "30 seconds option"
+  },
+  "settingsMinute1": {
+    "message": "Under 1 min",
+    "description": "1 minute option"
+  },
+  "settingsSectionData": {
+    "message": "List and Data",
+    "description": "List and data settings section"
+  },
+  "settingsAutoCleanupDays": {
+    "message": "Auto-delete old saved data",
+    "description": "Old data cleanup setting"
+  },
+  "settingsAutoCleanupDaysDesc": {
+    "message": "Cleans up old data when the popup opens",
+    "description": "Old data cleanup setting description"
+  },
+  "settingsCleanupNever": {
+    "message": "Never",
+    "description": "No auto cleanup"
+  },
+  "settingsDays30": {
+    "message": "30 days",
+    "description": "30 days option"
+  },
+  "settingsDays90": {
+    "message": "90 days",
+    "description": "90 days option"
+  },
+  "settingsDays180": {
+    "message": "180 days",
+    "description": "180 days option"
+  },
+  "settingsOpenVideoMode": {
+    "message": "Open video behavior",
+    "description": "Open video behavior setting"
+  },
+  "settingsOpenVideoModeDesc": {
+    "message": "Chooses how videos are opened from the list",
+    "description": "Open video behavior setting description"
+  },
+  "settingsOpenExisting": {
+    "message": "Prefer existing tab",
+    "description": "Prefer existing tab option"
+  },
+  "settingsOpenNew": {
+    "message": "Always new tab",
+    "description": "Always new tab option"
+  },
+  "settingsSectionManage": {
+    "message": "Data Management",
+    "description": "Data management section"
+  },
+  "settingsExport": {
+    "message": "Export",
+    "description": "Export saved data"
+  },
+  "settingsImport": {
+    "message": "Import",
+    "description": "Import saved data"
+  },
+  "settingsImportConfirm": {
+    "message": "Import saved data? Existing entries with the same video ID will be overwritten.",
+    "description": "Import confirmation"
+  },
+  "settingsImportError": {
+    "message": "Import failed. Check the JSON file contents.",
+    "description": "Import failure message"
   }
 }

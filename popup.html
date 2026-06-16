@@ -8,34 +8,108 @@
   <div class="container">
     <header>
       <h1 data-i18n="extName"></h1>
-      <div class="toggle-wrapper">
-        <label class="toggle" title="">
-          <input type="checkbox" id="enableToggle" checked>
-          <span class="slider"></span>
-        </label>
-        <span id="toggleLabel" class="toggle-label" data-i18n="popupEnabled"></span>
+      <div class="header-actions">
+        <button id="settingsBtn" class="icon-btn" data-i18n-title="settingsOpen" title="設定" aria-label="設定">&#9881;</button>
+        <div class="toggle-wrapper">
+          <label class="toggle" title="">
+            <input type="checkbox" id="enableToggle" checked>
+            <span class="slider"></span>
+          </label>
+          <span id="toggleLabel" class="toggle-label" data-i18n="popupEnabled"></span>
+        </div>
       </div>
     </header>
 
-    <div class="storage-info">
-      <span id="storageCount"></span>
-      <span id="storageSize"></span>
-    </div>
+    <main id="mainView">
+      <div class="storage-info">
+        <span id="storageCount"></span>
+        <span id="storageSize"></span>
+      </div>
 
-    <div class="actions">
-      <button id="deleteAllBtn" class="btn btn-danger" data-i18n="popupDeleteAll"></button>
-    </div>
+      <div class="search-wrapper">
+        <input type="text" id="searchInput" class="search-input" data-i18n-placeholder="popupSearchPlaceholder" placeholder="タイトルまたは動画IDで検索">
+      </div>
 
-    <div class="search-wrapper">
-      <input type="text" id="searchInput" class="search-input" data-i18n-placeholder="popupSearchPlaceholder" placeholder="タイトルまたは動画IDで検索">
-    </div>
+      <div id="videoList" class="video-list">
+        <!-- 動画リストがここに表示される -->
+      </div>
 
-    <div id="videoList" class="video-list">
-      <!-- 動画リストがここに表示される -->
-    </div>
+      <div id="emptyMessage" class="empty-message" style="display:none" data-i18n="popupNoData">
+      </div>
+    </main>
 
-    <div id="emptyMessage" class="empty-message" style="display:none" data-i18n="popupNoData">
-    </div>
+    <section id="settingsView" class="settings-view" hidden>
+      <div class="settings-title-row">
+        <button id="backBtn" class="icon-btn" data-i18n-title="settingsBack" title="戻る" aria-label="戻る">&#8592;</button>
+        <h2 data-i18n="settingsTitle"></h2>
+      </div>
+
+      <div class="settings-group">
+        <h3 data-i18n="settingsSectionRestore"></h3>
+        <label class="setting-row">
+          <span class="setting-text">
+            <span class="setting-label" data-i18n="settingsNotifyOnRestore"></span>
+            <span class="setting-description" data-i18n="settingsNotifyOnRestoreDesc"></span>
+          </span>
+          <input type="checkbox" id="notifyOnRestore">
+        </label>
+        <label class="setting-row">
+          <span class="setting-text">
+            <span class="setting-label" data-i18n="settingsAutoPlayOnRestore"></span>
+            <span class="setting-description" data-i18n="settingsAutoPlayOnRestoreDesc"></span>
+          </span>
+          <input type="checkbox" id="autoPlayOnRestore">
+        </label>
+        <label class="setting-row">
+          <span class="setting-text">
+            <span class="setting-label" data-i18n="settingsMinSaveSeconds"></span>
+            <span class="setting-description" data-i18n="settingsMinSaveSecondsDesc"></span>
+          </span>
+          <select id="minSaveSeconds" class="setting-select">
+            <option value="0" data-i18n="settingsMinSaveNever"></option>
+            <option value="10" data-i18n="settingsSeconds10"></option>
+            <option value="30" data-i18n="settingsSeconds30"></option>
+            <option value="60" data-i18n="settingsMinute1"></option>
+          </select>
+        </label>
+      </div>
+
+      <div class="settings-group">
+        <h3 data-i18n="settingsSectionData"></h3>
+        <label class="setting-row">
+          <span class="setting-text">
+            <span class="setting-label" data-i18n="settingsAutoCleanupDays"></span>
+            <span class="setting-description" data-i18n="settingsAutoCleanupDaysDesc"></span>
+          </span>
+          <select id="autoCleanupDays" class="setting-select">
+            <option value="0" data-i18n="settingsCleanupNever"></option>
+            <option value="30" data-i18n="settingsDays30"></option>
+            <option value="90" data-i18n="settingsDays90"></option>
+            <option value="180" data-i18n="settingsDays180"></option>
+          </select>
+        </label>
+        <label class="setting-row">
+          <span class="setting-text">
+            <span class="setting-label" data-i18n="settingsOpenVideoMode"></span>
+            <span class="setting-description" data-i18n="settingsOpenVideoModeDesc"></span>
+          </span>
+          <select id="openVideoMode" class="setting-select">
+            <option value="existing" data-i18n="settingsOpenExisting"></option>
+            <option value="new" data-i18n="settingsOpenNew"></option>
+          </select>
+        </label>
+      </div>
+
+      <div class="settings-group">
+        <h3 data-i18n="settingsSectionManage"></h3>
+        <div class="data-actions">
+          <button id="exportBtn" class="btn btn-secondary" data-i18n="settingsExport"></button>
+          <button id="importBtn" class="btn btn-secondary" data-i18n="settingsImport"></button>
+          <input type="file" id="importFile" accept="application/json" hidden>
+        </div>
+        <button id="deleteAllBtn" class="btn btn-danger btn-full" data-i18n="popupDeleteAll"></button>
+      </div>
+    </section>
   </div>
 
   <script src="popup.js"></script>

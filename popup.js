@@ -4,6 +4,16 @@
 
   const STORAGE_KEY_PREFIX = 'yt_position_';
   const SETTINGS_KEY = 'yt_position_settings';
+  const DEFAULT_SETTINGS = {
+    enabled: true,
+    notifyOnRestore: true,
+    autoPlayOnRestore: true,
+    minSaveSeconds: 0,
+    autoCleanupDays: 0,
+    openVideoMode: 'existing'
+  };
+
+  let allVideos = [];
 
   // i18n テキスト適用
   function applyI18n() {
@@ -19,6 +29,14 @@
       if (msg) el.placeholder = msg;
     });
     // タイトル属性
+    document.querySelectorAll('[data-i18n-title]').forEach((el) => {
+      const key = el.getAttribute('data-i18n-title');
+      const msg = chrome.i18n.getMessage(key);
+      if (msg) {
+        el.title = msg;
+        el.setAttribute('aria-label', msg);
+      }
+    });
     document.title = chrome.i18n.getMessage('extName') || document.title;
   }
 
@@ -56,12 +74,19 @@
   // 設定を読み込み
   async function loadSettings() {
     const result = await chrome.storage.local.get(SETTINGS_KEY);
-    return result[SETTINGS_KEY] || { enabled: true };
+    return { ...DEFAULT_SETTINGS, ...(result[SETTINGS_KEY] || {}) };
   }
 
   // 設定を保存
   async function saveSettings(settings) {
     await chrome.storage.local.set({ [SETTINGS_KEY]: settings });
+  }
+
+  async function updateSettings(partialSettings) {
+    const current = await loadSettings();
+    const next = { ...current, ...partialSettings };
+    await saveSettings(next);
+    return next;
   }
 
   // 保存データをすべて取得
@@ -90,9 +115,31 @@
     return new Blob([JSON.stringify(videos)]).size;
   }
 
+  async function cleanupExpiredVideos(settings) {
+    const days = Number(settings.autoCleanupDays) || 0;
+    if (days <= 0) return;
+
+    const videos = await getAllVideoData();
+    const threshold = Date.now() - days * 86400000;
+    const expiredKeys = videos
+      .filter((video) => (video.timestamp || 0) < threshold)
+      .map((video) => video.storageKey);
+
+    if (expiredKeys.length > 0) {
+      await chrome.storage.local.remove(expiredKeys);
+    }
+  }
+
   // 動画を開く（既存タブがあればそちらに切替、なければ新規タブ）
   async function openVideo(videoId) {
     const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    const settings = await loadSettings();
+
+    if (settings.openVideoMode === 'new') {
+      await chrome.tabs.create({ url: videoUrl });
+      return;
+    }
+
     try {
       // 既存のYouTubeタブを検索
       const tabs = await chrome.tabs.query({ url: 'https://www.youtube.com/*' });
@@ -138,7 +185,7 @@
     if (videos.length === 0) {
       emptyEl.style.display = 'block';
       listEl.style.display = 'none';
-      deleteAllBtn.disabled = true;
+      deleteAllBtn.disabled = allVideos.length === 0;
       return;
     }
 
@@ -177,15 +224,107 @@
       deleteBtn.addEventListener('click', async () => {
         await chrome.storage.local.remove(v.storageKey);
         item.remove();
-        // リスト再描画
-        const updated = await getAllVideoData();
-        renderVideoList(updated);
+        await refreshVideoList();
       });
 
       item.appendChild(info);
       item.appendChild(deleteBtn);
       listEl.appendChild(item);
     });
+  }
+
+  function getFilteredVideos() {
+    const searchInput = document.getElementById('searchInput');
+    const query = searchInput.value.trim().toLowerCase();
+    if (!query) return allVideos;
+
+    return allVideos.filter((v) => {
+      const title = (v.title || '').toLowerCase();
+      const id = v.videoId.toLowerCase();
+      return title.includes(query) || id.includes(query);
+    });
+  }
+
+  async function refreshVideoList() {
+    allVideos = await getAllVideoData();
+    renderVideoList(getFilteredVideos());
+  }
+
+  function showMainView() {
+    document.getElementById('mainView').hidden = false;
+    document.getElementById('settingsView').hidden = true;
+  }
+
+  function showSettingsView() {
+    document.getElementById('mainView').hidden = true;
+    document.getElementById('settingsView').hidden = false;
+  }
+
+  function applySettingsToForm(settings) {
+    document.getElementById('notifyOnRestore').checked = settings.notifyOnRestore;
+    document.getElementById('autoPlayOnRestore').checked = settings.autoPlayOnRestore;
+    document.getElementById('minSaveSeconds').value = String(settings.minSaveSeconds);
+    document.getElementById('autoCleanupDays').value = String(settings.autoCleanupDays);
+    document.getElementById('openVideoMode').value = settings.openVideoMode;
+  }
+
+  async function exportData() {
+    const settings = await loadSettings();
+    const videos = await getAllVideoData();
+    const payload = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      settings,
+      videos: videos.map(({ storageKey, ...video }) => video)
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const date = new Date().toISOString().slice(0, 10);
+    link.href = url;
+    link.download = `youtube-position-saver-${date}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function importData(file) {
+    const text = await file.text();
+    const payload = JSON.parse(text);
+    const videos = Array.isArray(payload.videos) ? payload.videos : [];
+
+    if (videos.length === 0 && !payload.settings) {
+      throw new Error('Invalid import file');
+    }
+
+    const confirmMsg = chrome.i18n.getMessage('settingsImportConfirm') || '保存データをインポートしますか？';
+    if (!confirm(confirmMsg)) return;
+
+    const updates = {};
+
+    videos.forEach((video) => {
+      if (!video || !video.videoId) return;
+      updates[STORAGE_KEY_PREFIX + video.videoId] = {
+        position: Number(video.position) || 0,
+        duration: Number(video.duration) || 0,
+        timestamp: Number(video.timestamp) || Date.now(),
+        title: video.title || video.videoId
+      };
+    });
+
+    if (payload.settings && typeof payload.settings === 'object') {
+      updates[SETTINGS_KEY] = { ...DEFAULT_SETTINGS, ...payload.settings };
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await chrome.storage.local.set(updates);
+      const importedSettings = await loadSettings();
+      applySettingsToForm(importedSettings);
+      const toggle = document.getElementById('enableToggle');
+      const toggleLabel = document.getElementById('toggleLabel');
+      toggle.checked = importedSettings.enabled;
+      updateToggleLabel(toggle.checked, toggleLabel);
+      await refreshVideoList();
+    }
   }
 
   // 初期化
@@ -195,14 +334,35 @@
     // トグル
     const toggle = document.getElementById('enableToggle');
     const toggleLabel = document.getElementById('toggleLabel');
-    const settings = await loadSettings();
+    let settings = await loadSettings();
     toggle.checked = settings.enabled;
     updateToggleLabel(toggle.checked, toggleLabel);
+    applySettingsToForm(settings);
 
     toggle.addEventListener('change', async () => {
-      const newSettings = { enabled: toggle.checked };
-      await saveSettings(newSettings);
+      settings = await updateSettings({ enabled: toggle.checked });
       updateToggleLabel(toggle.checked, toggleLabel);
+    });
+
+    document.getElementById('settingsBtn').addEventListener('click', showSettingsView);
+    document.getElementById('backBtn').addEventListener('click', showMainView);
+
+    document.getElementById('notifyOnRestore').addEventListener('change', async (event) => {
+      settings = await updateSettings({ notifyOnRestore: event.target.checked });
+    });
+    document.getElementById('autoPlayOnRestore').addEventListener('change', async (event) => {
+      settings = await updateSettings({ autoPlayOnRestore: event.target.checked });
+    });
+    document.getElementById('minSaveSeconds').addEventListener('change', async (event) => {
+      settings = await updateSettings({ minSaveSeconds: Number(event.target.value) });
+    });
+    document.getElementById('autoCleanupDays').addEventListener('change', async (event) => {
+      settings = await updateSettings({ autoCleanupDays: Number(event.target.value) });
+      await cleanupExpiredVideos(settings);
+      await refreshVideoList();
+    });
+    document.getElementById('openVideoMode').addEventListener('change', async (event) => {
+      settings = await updateSettings({ openVideoMode: event.target.value });
     });
 
     // 全削除
@@ -214,27 +374,35 @@
       const videos = await getAllVideoData();
       const keys = videos.map((v) => v.storageKey);
       await chrome.storage.local.remove(keys);
+      allVideos = [];
       renderVideoList([]);
     });
 
+    document.getElementById('exportBtn').addEventListener('click', exportData);
+    document.getElementById('importBtn').addEventListener('click', () => {
+      document.getElementById('importFile').click();
+    });
+    document.getElementById('importFile').addEventListener('change', async (event) => {
+      const file = event.target.files[0];
+      event.target.value = '';
+      if (!file) return;
+
+      try {
+        await importData(file);
+      } catch (e) {
+        const msg = chrome.i18n.getMessage('settingsImportError') || 'インポートできませんでした';
+        alert(msg);
+      }
+    });
+
     // 動画リスト表示
-    const videos = await getAllVideoData();
-    renderVideoList(videos);
+    await cleanupExpiredVideos(settings);
+    await refreshVideoList();
 
     // 検索フィルター
     const searchInput = document.getElementById('searchInput');
     searchInput.addEventListener('input', () => {
-      const query = searchInput.value.trim().toLowerCase();
-      if (!query) {
-        renderVideoList(videos);
-        return;
-      }
-      const filtered = videos.filter((v) => {
-        const title = (v.title || '').toLowerCase();
-        const id = v.videoId.toLowerCase();
-        return title.includes(query) || id.includes(query);
-      });
-      renderVideoList(filtered);
+      renderVideoList(getFilteredVideos());
     });
   }
 
