@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  const CONTENT_SCRIPT_VERSION = '1.8.0-settings-20260617';
+  const CONTENT_SCRIPT_VERSION = '1.8.2-orphan-cleanup-20260617';
   const existingController = window.__ytPositionSaverController;
 
   if (existingController?.version === CONTENT_SCRIPT_VERSION) {
@@ -125,6 +125,16 @@
     }
   }
 
+  // 拡張コンテキストが無効化された取り残し（orphan）インスタンスを検知したら、
+  // 自分のタイマー・リスナーを停止する。無効なら true を返し、呼び出し側は早期 return する。
+  // 拡張のリロード/更新で新しい content script が再注入されても、別 isolated world の
+  // 旧インスタンスは window 経由で cleanup されないため、各インスタンスが自力で止まる必要がある。
+  function stopIfExtensionInvalid() {
+    if (isExtensionValid()) return false;
+    cleanupContentScript();
+    return true;
+  }
+
   // 動画IDをURLから取得
   function getVideoId() {
     const urlParams = new URLSearchParams(window.location.search);
@@ -235,7 +245,8 @@
   async function savePositionCore(targetVideoId, options = {}) {
     const { skipPauseCheck = false } = options;
 
-    if (!isExtensionValid()) return;
+    // 定期保存（saveIntervalId）が orphan の主な心拍。無効を検知したら自己停止する。
+    if (stopIfExtensionInvalid()) return;
     if (!video || !targetVideoId) return;
 
     // 復元中は保存しない
@@ -519,6 +530,10 @@
 
   // メイン処理
   async function init() {
+    // orphan（拡張コンテキストが無効化された旧インスタンス）はここで自己停止する
+    // （「動画検出」ログや動画チェック用 setInterval を無駄に起動しないため）
+    if (stopIfExtensionInvalid()) return;
+
     // 設定で無効化されている場合は停止
     if (!(await isEnabled())) {
       stopSaving();
@@ -564,6 +579,9 @@
 
         // ライブ判定を最新化（プレイヤーの「ライブ」バッジの可視状態で判定）
         updateLiveStatus();
+
+        // orphan はここの storage 読み取りで例外＝「保存データ確認失敗」を出すため、手前で停止する
+        if (stopIfExtensionInvalid()) return;
 
         // 復元可能な保存データがあるか事前にチェック
         let hasRestorableStoredPosition = false;
