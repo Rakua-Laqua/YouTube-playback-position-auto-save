@@ -125,9 +125,37 @@
     "message": "Under 1 min",
     "description": "1 minute option"
   },
+  "settingsAutoDeleteWatched": {
+    "message": "Auto-delete fully watched videos",
+    "description": "Auto delete on watch complete setting"
+  },
+  "settingsAutoDeleteWatchedDesc": {
+    "message": "When off, fully watched videos stay in the list",
+    "description": "Auto delete on watch complete setting description"
+  },
   "settingsSectionData": {
     "message": "List and Data",
     "description": "List and data settings section"
+  },
+  "settingsSaveInterval": {
+    "message": "Save interval",
+    "description": "Save interval setting (advanced)"
+  },
+  "settingsSaveIntervalDesc": {
+    "message": "How often the playback position is saved (rarely needs changing)",
+    "description": "Save interval setting description"
+  },
+  "settingsInterval5": {
+    "message": "5 sec",
+    "description": "5 second interval option"
+  },
+  "settingsInterval10": {
+    "message": "10 sec",
+    "description": "10 second interval option"
+  },
+  "settingsInterval30": {
+    "message": "30 sec",
+    "description": "30 second interval option"
   },
   "settingsAutoCleanupDays": {
     "message": "Auto-delete old saved data",

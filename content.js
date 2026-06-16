@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  const CONTENT_SCRIPT_VERSION = '1.7.0-reinject-20260616';
+  const CONTENT_SCRIPT_VERSION = '1.8.0-settings-20260617';
   const existingController = window.__ytPositionSaverController;
 
   if (existingController?.version === CONTENT_SCRIPT_VERSION) {
@@ -22,7 +22,7 @@
 
   // 定数
   const STORAGE_KEY_PREFIX = 'yt_position_';
-  const SAVE_INTERVAL_MS = 5000; // 5秒ごとに保存
+  const SAVE_INTERVAL_MS = 5000; // 保存間隔の既定値（設定未指定時のフォールバック）
   const VIDEO_CHECK_INTERVAL_MS = 100; // 動画要素チェック間隔
   const VIDEO_CHECK_TIMEOUT_MS = 5000; // 動画要素チェックタイムアウト
   const NOTIFICATION_DURATION_MS = 3000; // 通知表示時間
@@ -39,6 +39,8 @@
     notifyOnRestore: true,
     autoPlayOnRestore: true,
     minSaveSeconds: 0,
+    autoDeleteWatched: true,
+    saveIntervalSeconds: 5,
     autoCleanupDays: 0,
     openVideoMode: 'existing'
   };
@@ -101,6 +103,8 @@
     // 動画終了時は保存データを削除
     if (!isExtensionValid()) return;
     hasEnded = true;
+    // 「最後まで見た動画を自動削除」がオフなら保存データを残す
+    if (!settingsCache.autoDeleteWatched) return;
     lastValidPosition = null;
     if (currentVideoId) {
       try {
@@ -251,10 +255,13 @@
     if (!isValidPosition(currentTime)) return;
     if (!isPastMinimumSaveTime(currentTime)) return;
 
-    // 動画の終わり付近（残り END_THRESHOLD_SEC 秒以内）の場合は保存データを削除
+    // 動画の終わり付近（残り END_THRESHOLD_SEC 秒以内）の場合
     // （endedイベントが発火しないケースへの対策）
     if (currentTime >= duration - END_THRESHOLD_SEC) {
+      // 終了扱いにして以後の再保存を止める（自動削除オフでも末尾位置は保存しない）
       hasEnded = true;
+      // 「最後まで見た動画を自動削除」がオフなら保存データを残す
+      if (!settingsCache.autoDeleteWatched) return;
       lastValidPosition = null;
       try {
         await chrome.storage.local.remove(getStorageKey(targetVideoId));
@@ -443,7 +450,8 @@
     if (saveIntervalId) {
       clearInterval(saveIntervalId);
     }
-    saveIntervalId = setInterval(savePosition, SAVE_INTERVAL_MS);
+    const intervalMs = (Number(settingsCache.saveIntervalSeconds) || 0) * 1000 || SAVE_INTERVAL_MS;
+    saveIntervalId = setInterval(savePosition, intervalMs);
   }
 
   // 定期保存を停止
@@ -630,6 +638,12 @@
       stopSaving();
       currentVideoId = null;
       return;
+    }
+
+    // 保存中なら新しい保存間隔で張り替える
+    // （init() は同じ動画だと早期 return するため、ここで明示的に再起動する）
+    if (saveIntervalId) {
+      startSaving();
     }
 
     scheduleInit(0);

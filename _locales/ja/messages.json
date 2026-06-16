@@ -125,9 +125,37 @@
     "message": "1分未満",
     "description": "1分オプション"
   },
+  "settingsAutoDeleteWatched": {
+    "message": "最後まで見た動画を自動削除",
+    "description": "視聴完了時の自動削除設定"
+  },
+  "settingsAutoDeleteWatchedDesc": {
+    "message": "オフにすると最後まで見た動画も一覧に残します",
+    "description": "視聴完了時の自動削除設定の説明"
+  },
   "settingsSectionData": {
     "message": "一覧とデータ",
     "description": "一覧とデータ設定セクション"
+  },
+  "settingsSaveInterval": {
+    "message": "保存間隔",
+    "description": "保存間隔設定（詳細設定）"
+  },
+  "settingsSaveIntervalDesc": {
+    "message": "再生位置を保存する間隔です（通常は変更不要）",
+    "description": "保存間隔設定の説明"
+  },
+  "settingsInterval5": {
+    "message": "5秒",
+    "description": "保存間隔5秒オプション"
+  },
+  "settingsInterval10": {
+    "message": "10秒",
+    "description": "保存間隔10秒オプション"
+  },
+  "settingsInterval30": {
+    "message": "30秒",
+    "description": "保存間隔30秒オプション"
   },
   "settingsAutoCleanupDays": {
     "message": "古い保存データを自動削除",

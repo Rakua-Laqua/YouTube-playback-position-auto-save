@@ -9,6 +9,8 @@
     notifyOnRestore: true,
     autoPlayOnRestore: true,
     minSaveSeconds: 0,
+    autoDeleteWatched: true,
+    saveIntervalSeconds: 5,
     autoCleanupDays: 0,
     openVideoMode: 'existing'
   };
@@ -264,6 +266,8 @@
     document.getElementById('notifyOnRestore').checked = settings.notifyOnRestore;
     document.getElementById('autoPlayOnRestore').checked = settings.autoPlayOnRestore;
     document.getElementById('minSaveSeconds').value = String(settings.minSaveSeconds);
+    document.getElementById('autoDeleteWatched').checked = settings.autoDeleteWatched;
+    document.getElementById('saveIntervalSeconds').value = String(settings.saveIntervalSeconds);
     document.getElementById('autoCleanupDays').value = String(settings.autoCleanupDays);
     document.getElementById('openVideoMode').value = settings.openVideoMode;
   }
@@ -355,6 +359,12 @@
     });
     document.getElementById('minSaveSeconds').addEventListener('change', async (event) => {
       settings = await updateSettings({ minSaveSeconds: Number(event.target.value) });
+    });
+    document.getElementById('autoDeleteWatched').addEventListener('change', async (event) => {
+      settings = await updateSettings({ autoDeleteWatched: event.target.checked });
+    });
+    document.getElementById('saveIntervalSeconds').addEventListener('change', async (event) => {
+      settings = await updateSettings({ saveIntervalSeconds: Number(event.target.value) });
     });
     document.getElementById('autoCleanupDays').addEventListener('change', async (event) => {
       settings = await updateSettings({ autoCleanupDays: Number(event.target.value) });

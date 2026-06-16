@@ -72,10 +72,28 @@
             <option value="60" data-i18n="settingsMinute1"></option>
           </select>
         </label>
+        <label class="setting-row">
+          <span class="setting-text">
+            <span class="setting-label" data-i18n="settingsAutoDeleteWatched"></span>
+            <span class="setting-description" data-i18n="settingsAutoDeleteWatchedDesc"></span>
+          </span>
+          <input type="checkbox" id="autoDeleteWatched">
+        </label>
       </div>
 
       <div class="settings-group">
         <h3 data-i18n="settingsSectionData"></h3>
+        <label class="setting-row">
+          <span class="setting-text">
+            <span class="setting-label" data-i18n="settingsSaveInterval"></span>
+            <span class="setting-description" data-i18n="settingsSaveIntervalDesc"></span>
+          </span>
+          <select id="saveIntervalSeconds" class="setting-select">
+            <option value="5" data-i18n="settingsInterval5"></option>
+            <option value="10" data-i18n="settingsInterval10"></option>
+            <option value="30" data-i18n="settingsInterval30"></option>
+          </select>
+        </label>
         <label class="setting-row">
           <span class="setting-text">
             <span class="setting-label" data-i18n="settingsAutoCleanupDays"></span>
