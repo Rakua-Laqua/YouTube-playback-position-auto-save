@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  const CONTENT_SCRIPT_VERSION = '1.8.2-orphan-cleanup-20260617';
+  const CONTENT_SCRIPT_VERSION = '1.8.3-ad-guard-20260618';
   const existingController = window.__ytPositionSaverController;
 
   if (existingController?.version === CONTENT_SCRIPT_VERSION) {
@@ -32,6 +32,8 @@
   const DURATION_DIFF_THRESHOLD = 5; // 動画長さの差異許容値（秒）
   const POPSTATE_INIT_DELAY_MS = 300; // popstate後の初期化遅延
   const SEEKED_TIMEOUT_MS = 3000; // seeked イベントのタイムアウト（ms）
+  const AD_RESTORE_RETRY_MS = 1000; // 広告終了待ちの復元リトライ間隔
+  const AD_RESTORE_MAX_WAIT_MS = 120000; // 広告終了待ちの最大時間
   const SETTINGS_KEY = 'yt_position_settings'; // 設定用ストレージキー
   const END_THRESHOLD_SEC = 3; // 動画終了判定の閾値（秒）
   const DEFAULT_SETTINGS = {
@@ -59,6 +61,8 @@
   // initの多重起動抑止
   let initTimerId = null;
   let lastNavigateFinishAt = 0;
+  let restoreRetryTimerId = null;
+  let restoreRetryStartedAt = 0;
 
   function scheduleInit(delayMs = 0) {
     if (initTimerId) {
@@ -66,7 +70,9 @@
     }
     initTimerId = setTimeout(() => {
       initTimerId = null;
-      init();
+      init().catch((e) => {
+        console.warn('[YouTube再生位置保存] init失敗:', e.message || e);
+      });
     }, delayMs);
   }
 
@@ -77,6 +83,7 @@
 
   function handleTimeUpdate() {
     if (!currentVideoId || !video) return;
+    if (isAdPlaying()) return;
     // 動画終了済みの場合は位置を更新しない
     if (hasEnded) return;
 
@@ -100,11 +107,16 @@
   }
 
   function handleEnded() {
+    if (isAdPlaying()) return;
+
     // 動画終了時は保存データを削除
     if (!isExtensionValid()) return;
     hasEnded = true;
     // 「最後まで見た動画を自動削除」がオフなら保存データを残す
-    if (!settingsCache.autoDeleteWatched) return;
+    if (!settingsCache.autoDeleteWatched) {
+      saveWatchedPosition(currentVideoId, '動画終了');
+      return;
+    }
     lastValidPosition = null;
     if (currentVideoId) {
       try {
@@ -113,6 +125,14 @@
       } catch (e) {
         console.warn('[YouTube再生位置保存] 動画終了時の削除失敗:', e.message || e);
       }
+    }
+  }
+
+  function handleSeeked() {
+    if (!video || isRestoring || isAdPlaying()) return;
+
+    if (hasEnded && isValidDuration(video.duration) && video.currentTime < video.duration - END_THRESHOLD_SEC) {
+      hasEnded = false;
     }
   }
 
@@ -144,6 +164,11 @@
   // ストレージキーを生成
   function getStorageKey(videoId) {
     return STORAGE_KEY_PREFIX + videoId;
+  }
+
+  function isAdPlaying() {
+    const player = video?.closest?.('.html5-video-player') || document.querySelector('.html5-video-player');
+    return !!player?.classList.contains('ad-showing');
   }
 
   function isValidDuration(duration) {
@@ -200,6 +225,54 @@
     return video && !isActiveLiveVideo() && isValidDuration(video.duration);
   }
 
+  function isSavableCurrentVideo() {
+    return isRestorableCurrentVideo() && !isAdPlaying();
+  }
+
+  function cleanupRestoreRetryTimer() {
+    if (restoreRetryTimerId) {
+      clearTimeout(restoreRetryTimerId);
+      restoreRetryTimerId = null;
+    }
+    restoreRetryStartedAt = 0;
+  }
+
+  function scheduleRestoreAfterAd(videoId) {
+    if (!videoId || restoreRetryTimerId) return;
+
+    const now = Date.now();
+    if (!restoreRetryStartedAt) {
+      restoreRetryStartedAt = now;
+    }
+
+    if (now - restoreRetryStartedAt > AD_RESTORE_MAX_WAIT_MS) {
+      restoreRetryStartedAt = 0;
+      console.log('[YouTube再生位置保存] 広告終了待ちがタイムアウトしたため復元をスキップ');
+      return;
+    }
+
+    restoreRetryTimerId = setTimeout(async () => {
+      restoreRetryTimerId = null;
+
+      if (currentVideoId !== videoId || !video) {
+        restoreRetryStartedAt = 0;
+        return;
+      }
+
+      if (isAdPlaying()) {
+        scheduleRestoreAfterAd(videoId);
+        return;
+      }
+
+      restoreRetryStartedAt = 0;
+      try {
+        await restorePosition();
+      } catch (e) {
+        console.warn('[YouTube再生位置保存] 広告後の復元リトライ失敗:', e.message || e);
+      }
+    }, AD_RESTORE_RETRY_MS);
+  }
+
   async function removeStoredPosition(videoId, reason) {
     if (!videoId) return;
 
@@ -252,6 +325,9 @@
     // 復元中は保存しない
     if (isRestoring) return;
 
+    // 広告中は広告動画の位置・長さを保存しない
+    if (isAdPlaying()) return;
+
     // 動画終了済みの場合は保存しない（ended後のSPA遷移で再保存されるのを防止）
     if (hasEnded) return;
 
@@ -262,17 +338,20 @@
     const duration = video.duration;
 
     // 無効な値の場合は保存しない
-    if (!isRestorableCurrentVideo()) return;
+    if (!isSavableCurrentVideo()) return;
     if (!isValidPosition(currentTime)) return;
     if (!isPastMinimumSaveTime(currentTime)) return;
 
     // 動画の終わり付近（残り END_THRESHOLD_SEC 秒以内）の場合
     // （endedイベントが発火しないケースへの対策）
     if (currentTime >= duration - END_THRESHOLD_SEC) {
-      // 終了扱いにして以後の再保存を止める（自動削除オフでも末尾位置は保存しない）
+      // 終了扱いにして以後の再保存を止める（自動削除オフなら末尾位置を保持する）
       hasEnded = true;
       // 「最後まで見た動画を自動削除」がオフなら保存データを残す
-      if (!settingsCache.autoDeleteWatched) return;
+      if (!settingsCache.autoDeleteWatched) {
+        await saveWatchedPosition(targetVideoId, '動画終了付近');
+        return;
+      }
       lastValidPosition = null;
       try {
         await chrome.storage.local.remove(getStorageKey(targetVideoId));
@@ -301,6 +380,30 @@
     }
   }
 
+  async function saveWatchedPosition(targetVideoId, reason) {
+    if (!video || !targetVideoId || isAdPlaying()) return;
+
+    const duration = video.duration;
+    const currentTime = video.currentTime;
+    if (!isValidDuration(duration) || !isValidPosition(currentTime)) return;
+
+    const data = {
+      position: Math.min(currentTime, duration),
+      duration: duration,
+      timestamp: Date.now(),
+      title: document.title
+    };
+
+    lastValidPosition = { videoId: targetVideoId, data: data };
+
+    try {
+      await chrome.storage.local.set({ [getStorageKey(targetVideoId)]: data });
+      console.log(`[YouTube再生位置保存] ${reason}: 保存データを保持`);
+    } catch (e) {
+      console.warn(`[YouTube再生位置保存] ${reason}の保存失敗:`, e.message || e);
+    }
+  }
+
   // 再生位置を保存（定期保存用）
   function savePosition() {
     // 定期的にライブ判定を最新化（timeupdate / 各保存はこのキャッシュを参照する）
@@ -314,12 +417,12 @@
   }
 
   // メモリに保持した最後の位置を保存（ページ遷移時用）
-  function saveLastValidPosition() {
+  async function saveLastValidPosition() {
     if (!isExtensionValid()) return;
     if (!lastValidPosition) return;
 
     try {
-      chrome.storage.local.set({ [getStorageKey(lastValidPosition.videoId)]: lastValidPosition.data });
+      await chrome.storage.local.set({ [getStorageKey(lastValidPosition.videoId)]: lastValidPosition.data });
       console.log(`[YouTube再生位置保存] 遷移時保存: ${Math.floor(lastValidPosition.data.position)}秒`);
     } catch (e) {
       console.warn('[YouTube再生位置保存] 遷移時保存失敗:', e.message || e);
@@ -327,14 +430,18 @@
   }
 
   // 遷移/非表示/離脱時の保存を統一（popstate等の相性改善）
-  function saveForNavigation() {
-    // 可能なら現在のvideoから直接保存（lastValidPositionに依存しない）
-    if (currentVideoId && video) {
-      savePositionCore(currentVideoId, { skipPauseCheck: true });
-    } else {
-      saveLastValidPosition();
+  async function saveForNavigation() {
+    try {
+      // 可能なら現在のvideoから直接保存（lastValidPositionに依存しない）
+      // 広告中は本編の最後に保持した位置だけを保存する。
+      if (currentVideoId && video && !isAdPlaying()) {
+        await savePositionCore(currentVideoId, { skipPauseCheck: true });
+      } else {
+        await saveLastValidPosition();
+      }
+    } finally {
+      lastValidPosition = null;
     }
-    lastValidPosition = null;
   }
 
   // 保存された再生位置を復元
@@ -363,6 +470,13 @@
 
         // ライブ判定を最新化してから復元可否を判定
         updateLiveStatus();
+        if (isAdPlaying()) {
+          console.log('[YouTube再生位置保存] 広告中のため復元を延期');
+          scheduleRestoreAfterAd(currentVideoId);
+          finishRestore({ resumeIfPaused: true });
+          return;
+        }
+
         if (!isRestorableCurrentVideo()) {
           await removeStoredPosition(currentVideoId, 'ライブ配信または無効な動画長');
           finishRestore({ resumeIfPaused: true });
@@ -487,6 +601,7 @@
       video.removeEventListener('pause', handlePause);
       video.removeEventListener('timeupdate', handleTimeUpdate);
       video.removeEventListener('ended', handleEnded);
+      video.removeEventListener('seeked', handleSeeked);
     }
   }
 
@@ -507,6 +622,7 @@
     video.addEventListener('pause', handlePause);
     video.addEventListener('timeupdate', handleTimeUpdate);
     video.addEventListener('ended', handleEnded);
+    video.addEventListener('seeked', handleSeeked);
 
     return true;
   }
@@ -550,8 +666,31 @@
       return;
     }
 
-    // 同じ動画の場合は何もしない
-    if (videoId === currentVideoId) return;
+    // 同じ動画でも <video> が再作成されている場合はリスナーを張り直す
+    if (videoId === currentVideoId) {
+      if (setupVideo()) {
+        updateLiveStatus();
+        if (!saveIntervalId) startSaving();
+      } else {
+        cleanupVideoCheckInterval();
+        const capturedVideoId = videoId;
+        videoCheckIntervalId = setInterval(() => {
+          if (currentVideoId !== capturedVideoId) {
+            cleanupVideoCheckInterval();
+            return;
+          }
+
+          if (setupVideo()) {
+            cleanupVideoCheckInterval();
+            updateLiveStatus();
+            if (!saveIntervalId) startSaving();
+          }
+        }, VIDEO_CHECK_INTERVAL_MS);
+
+        setTimeout(() => cleanupVideoCheckInterval(), VIDEO_CHECK_TIMEOUT_MS);
+      }
+      return;
+    }
 
     // 前の動画の位置を保存（競合状態防止：先にIDを保持）
     const previousVideoId = currentVideoId;
@@ -560,6 +699,7 @@
     }
 
     currentVideoId = videoId;
+    cleanupRestoreRetryTimer();
     hasEnded = false; // 新しい動画への遷移時にリセット
     isLiveCached = false; // 前の動画のライブ判定を引き継がない（既定は復元対象＝非ライブ）
     console.log(`[YouTube再生位置保存] 動画検出: ${videoId}`);
@@ -597,7 +737,7 @@
 
         // 復元可能な保存データがある場合は復元前の保存を抑止してから一時停止
         // （pause イベントで現在位置=0付近が保存され、復元データを上書きするのを防ぐ）
-        if (hasRestorableStoredPosition) {
+        if (hasRestorableStoredPosition && !isAdPlaying()) {
           isRestoring = true;
           pauseForRestore();
         }
@@ -622,17 +762,17 @@
   }
 
   function handleBeforeUnload() {
-    saveForNavigation();
+    void saveForNavigation();
   }
 
   function handleYtNavigateFinish() {
     lastNavigateFinishAt = Date.now();
-    saveForNavigation();
+    void saveForNavigation();
     scheduleInit(0);
   }
 
   function handlePopState() {
-    saveForNavigation();
+    void saveForNavigation();
 
     // yt-navigate-finish直後のpopstateは二重初期化になりやすいので抑止
     const now = Date.now();
@@ -643,7 +783,7 @@
 
   function handleVisibilityChange() {
     if (document.hidden) {
-      saveForNavigation();
+      void saveForNavigation();
     }
   }
 
@@ -674,6 +814,7 @@
     }
     stopSaving();
     cleanupVideoCheckInterval();
+    cleanupRestoreRetryTimer();
     cleanupVideoListeners();
 
     window.removeEventListener('beforeunload', handleBeforeUnload);

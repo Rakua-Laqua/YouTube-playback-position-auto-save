@@ -4,6 +4,7 @@
 
   const STORAGE_KEY_PREFIX = 'yt_position_';
   const SETTINGS_KEY = 'yt_position_settings';
+  const YOUTUBE_VIDEO_ID_PATTERN = /^[a-zA-Z0-9_-]{11}$/;
   const DEFAULT_SETTINGS = {
     enabled: true,
     notifyOnRestore: true,
@@ -71,6 +72,10 @@
   function formatBytes(bytes) {
     if (bytes < 1024) return bytes + ' B';
     return (bytes / 1024).toFixed(1) + ' KB';
+  }
+
+  function isValidVideoId(videoId) {
+    return typeof videoId === 'string' && YOUTUBE_VIDEO_ID_PATTERN.test(videoId);
   }
 
   // 設定を読み込み
@@ -180,9 +185,10 @@
     listEl.innerHTML = '';
 
     // ストレージ情報
-    const countLabel = (chrome.i18n.getMessage('popupVideoCount') || '{n}件の動画').replace('{n}', videos.length);
+    const displayedCount = videos.length === allVideos.length ? String(videos.length) : `${videos.length} / ${allVideos.length}`;
+    const countLabel = (chrome.i18n.getMessage('popupVideoCount') || '{n}件の動画').replace('{n}', displayedCount);
     countEl.textContent = countLabel;
-    sizeEl.textContent = `≈ ${formatBytes(estimateSize(videos))}`;
+    sizeEl.textContent = `≈ ${formatBytes(estimateSize(allVideos))}`;
 
     if (videos.length === 0) {
       emptyEl.style.display = 'block';
@@ -214,7 +220,11 @@
 
       const meta = document.createElement('div');
       meta.className = 'video-meta';
-      meta.innerHTML = `<span class="position">${formatTime(v.position)}</span> / ${formatTime(v.duration)} ・ ${relativeTime(v.timestamp)}`;
+      const position = document.createElement('span');
+      position.className = 'position';
+      position.textContent = formatTime(v.position);
+      meta.appendChild(position);
+      meta.appendChild(document.createTextNode(` / ${formatTime(v.duration)} ・ ${relativeTime(v.timestamp)}`));
 
       info.appendChild(title);
       info.appendChild(meta);
@@ -288,15 +298,17 @@
     link.href = url;
     link.download = `youtube-position-saver-${date}.json`;
     link.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   async function importData(file) {
     const text = await file.text();
     const payload = JSON.parse(text);
     const videos = Array.isArray(payload.videos) ? payload.videos : [];
+    const importableVideos = videos.filter((video) => video && isValidVideoId(video.videoId));
+    const hasImportableSettings = payload.settings && typeof payload.settings === 'object';
 
-    if (videos.length === 0 && !payload.settings) {
+    if (importableVideos.length === 0 && !hasImportableSettings) {
       throw new Error('Invalid import file');
     }
 
@@ -305,8 +317,7 @@
 
     const updates = {};
 
-    videos.forEach((video) => {
-      if (!video || !video.videoId) return;
+    importableVideos.forEach((video) => {
       updates[STORAGE_KEY_PREFIX + video.videoId] = {
         position: Number(video.position) || 0,
         duration: Number(video.duration) || 0,
@@ -315,7 +326,7 @@
       };
     });
 
-    if (payload.settings && typeof payload.settings === 'object') {
+    if (hasImportableSettings) {
       updates[SETTINGS_KEY] = { ...DEFAULT_SETTINGS, ...payload.settings };
     }
 
