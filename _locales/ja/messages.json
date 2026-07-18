@@ -216,5 +216,13 @@
   "settingsImportError": {
     "message": "インポートできませんでした。JSONファイルの内容を確認してください。",
     "description": "インポート失敗メッセージ"
+  },
+  "popupFatalError": {
+    "message": "ポップアップの初期化に失敗しました。拡張機能を再読み込みしてください。",
+    "description": "ポップアップ初期化失敗メッセージ"
+  },
+  "popupOperationError": {
+    "message": "操作に失敗しました。もう一度お試しください。",
+    "description": "ポップアップ操作失敗メッセージ"
   }
 }

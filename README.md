@@ -1,4 +1,4 @@
-# YouTube 再生位置自動保存 v1.8.3
+# YouTube 再生位置自動保存 v1.9.0
 
 YouTube の動画再生位置をブラウザ内に自動保存し、同じ動画を開き直したときに前回の続きから再開する Chrome 拡張機能です。
 
@@ -131,13 +131,13 @@ YouTube の視聴履歴を残さない設定で使っている場合でも、再
 - `scripting`: 拡張機能の更新・再読み込み後に、既存の YouTube タブへ `content.js` を再注入するため
 - `https://www.youtube.com/*`: YouTube ページ上で `content.js` を動作させ、既存タブへの再注入を許可するため
 
-通常のページ読み込みでは `manifest.json` の `content_scripts` による自動注入を使用します。既に開いている YouTube タブに対しては、`background.js` が拡張機能の更新・再読み込み・ブラウザ起動・タブのアクティブ化・タブの読み込み完了時に再注入を試みます。`content.js` 側では再注入時に古いイベントリスナーやタイマーを掃除し、二重起動を防ぎます。
+通常のページ読み込みでは `manifest.json` の `content_scripts` による自動注入を使用します。既に開いている YouTube タブに対しては、`background.js` が拡張機能のインストール・更新・ブラウザ起動時のみ、生存確認（ping）のうえ必要なら再注入します。`content.js` 側では再注入時に古いイベントリスナーやタイマーを掃除し、二重起動を防ぎます。
 
 ## 仕様（主要な定数）
 
 | 項目 | 値 | 説明 |
 | --- | --- | --- |
-| `SAVE_INTERVAL_MS` | 5000 ms | 定期保存のフォールバック間隔（通常は設定値を使用） |
+| 保存間隔 | 5 / 10 / 30 秒 | 設定で選択（`shared.js` で正規化） |
 | `VIDEO_CHECK_INTERVAL_MS` | 100 ms | `<video>` 要素の検出間隔 |
 | `VIDEO_CHECK_TIMEOUT_MS` | 5000 ms | `<video>` 要素検出のタイムアウト |
 | `END_THRESHOLD_SEC` | 3 秒 | 動画末尾とみなして保存データを削除または保持する閾値 |
@@ -162,11 +162,14 @@ YouTube の視聴履歴を残さない設定で使っている場合でも、再
 ```text
 Youtube再生位置自動保存/
 ├── manifest.json        # 拡張機能の設定
-├── background.js        # Service Worker（既存 YouTube タブへの再注入処理）
+├── shared.js            # 設定・動画データの共通スキーマ検証
+├── background.js        # Service Worker（インストール/起動時の再注入）
 ├── content.js           # 再生位置の保存・復元処理
 ├── popup.html           # ポップアップ画面
 ├── popup.js             # ポップアップの表示・検索・削除・設定・データ管理処理
 ├── popup.css            # ポップアップのスタイル
+├── tests/               # node:test による単体テスト
+├── package.json         # npm test / npm run check
 ├── _locales/
 │   ├── ja/messages.json # 日本語メッセージ
 │   └── en/messages.json # 英語メッセージ
@@ -181,7 +184,7 @@ MIT License
 
 ## バージョン
 
-現在のバージョン: **1.8.3**
+現在のバージョン: **1.9.0**
 
 詳細な更新履歴は [CHANGELOG.md](CHANGELOG.md) を参照してください。
 

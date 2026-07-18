@@ -1,0 +1,10 @@
+{
+  "name": "youtube-playback-position-auto-save",
+  "version": "1.9.0",
+  "private": true,
+  "description": "YouTube 再生位置自動保存 ブラウザ拡張機能",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "check": "node --check shared.js && node --check content.js && node --check popup.js && node --check background.js"
+  }
+}

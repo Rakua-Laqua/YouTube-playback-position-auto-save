@@ -216,5 +216,13 @@
   "settingsImportError": {
     "message": "Import failed. Check the JSON file contents.",
     "description": "Import failure message"
+  },
+  "popupFatalError": {
+    "message": "Failed to initialize the popup. Please reload the extension.",
+    "description": "Popup fatal initialization error"
+  },
+  "popupOperationError": {
+    "message": "The operation failed. Please try again.",
+    "description": "Popup operation error"
   }
 }

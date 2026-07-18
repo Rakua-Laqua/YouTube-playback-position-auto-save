@@ -2,21 +2,20 @@
 (function () {
   'use strict';
 
+  const Shared = globalThis.YtPositionSaverShared;
+  if (!Shared) {
+    console.error('[YouTube再生位置保存] shared.js が読み込まれていません');
+    return;
+  }
+
   const STORAGE_KEY_PREFIX = 'yt_position_';
   const SETTINGS_KEY = 'yt_position_settings';
-  const YOUTUBE_VIDEO_ID_PATTERN = /^[a-zA-Z0-9_-]{11}$/;
-  const DEFAULT_SETTINGS = {
-    enabled: true,
-    notifyOnRestore: true,
-    autoPlayOnRestore: true,
-    minSaveSeconds: 0,
-    autoDeleteWatched: true,
-    saveIntervalSeconds: 5,
-    autoCleanupDays: 0,
-    openVideoMode: 'existing'
-  };
+  const DEFAULT_SETTINGS = Shared.DEFAULT_SETTINGS;
+  const SEARCH_DEBOUNCE_MS = 150;
 
   let allVideos = [];
+  let cachedStorageSize = 0;
+  let searchDebounceTimerId = null;
 
   // i18n テキスト適用
   function applyI18n() {
@@ -45,7 +44,7 @@
 
   // 秒を MM:SS or HH:MM:SS に変換
   function formatTime(seconds) {
-    const s = Math.floor(seconds);
+    const s = Math.floor(Number(seconds) || 0);
     const h = Math.floor(s / 3600);
     const m = Math.floor((s % 3600) / 60);
     const sec = s % 60;
@@ -57,7 +56,7 @@
 
   // 相対時間表示
   function relativeTime(timestamp) {
-    const diff = Date.now() - timestamp;
+    const diff = Date.now() - (Number(timestamp) || 0);
     const minutes = Math.floor(diff / 60000);
     const hours = Math.floor(diff / 3600000);
     const days = Math.floor(diff / 86400000);
@@ -74,26 +73,54 @@
     return (bytes / 1024).toFixed(1) + ' KB';
   }
 
-  function isValidVideoId(videoId) {
-    return typeof videoId === 'string' && YOUTUBE_VIDEO_ID_PATTERN.test(videoId);
+  function showFatalError(error) {
+    const msg = chrome.i18n.getMessage('popupFatalError')
+      || 'ポップアップの初期化に失敗しました。拡張機能を再読み込みしてください。';
+    console.error('[YouTube再生位置保存] popup fatal:', error);
+    const container = document.querySelector('.container');
+    if (container) {
+      container.textContent = msg;
+      return;
+    }
+    alert(msg);
+  }
+
+  function showOperationError(error) {
+    const msg = chrome.i18n.getMessage('popupOperationError')
+      || '操作に失敗しました。もう一度お試しください。';
+    console.warn('[YouTube再生位置保存] popup operation failed:', error?.message || error);
+    alert(msg);
+  }
+
+  function withErrorBoundary(asyncFn) {
+    return (...args) => {
+      Promise.resolve()
+        .then(() => asyncFn(...args))
+        .catch(showOperationError);
+    };
   }
 
   // 設定を読み込み
   async function loadSettings() {
-    const result = await chrome.storage.local.get(SETTINGS_KEY);
-    return { ...DEFAULT_SETTINGS, ...(result[SETTINGS_KEY] || {}) };
+    try {
+      const result = await chrome.storage.local.get(SETTINGS_KEY);
+      return Shared.normalizeSettings(result[SETTINGS_KEY]);
+    } catch (e) {
+      console.warn('[YouTube再生位置保存] 設定読込失敗:', e.message || e);
+      throw e;
+    }
   }
 
   // 設定を保存
   async function saveSettings(settings) {
-    await chrome.storage.local.set({ [SETTINGS_KEY]: settings });
+    const normalized = Shared.normalizeSettings(settings);
+    await chrome.storage.local.set({ [SETTINGS_KEY]: normalized });
+    return normalized;
   }
 
   async function updateSettings(partialSettings) {
     const current = await loadSettings();
-    const next = { ...current, ...partialSettings };
-    await saveSettings(next);
-    return next;
+    return saveSettings({ ...current, ...partialSettings });
   }
 
   // 保存データをすべて取得
@@ -104,10 +131,14 @@
     for (const [key, value] of Object.entries(allData)) {
       if (key.startsWith(STORAGE_KEY_PREFIX) && key !== SETTINGS_KEY) {
         const videoId = key.replace(STORAGE_KEY_PREFIX, '');
-        videos.push({
+        const normalized = Shared.normalizeVideoRecord({
           videoId,
-          storageKey: key,
-          ...value
+          ...(value && typeof value === 'object' ? value : {})
+        });
+        if (!normalized) continue;
+        videos.push({
+          ...normalized,
+          storageKey: key
         });
       }
     }
@@ -122,19 +153,33 @@
     return new Blob([JSON.stringify(videos)]).size;
   }
 
-  async function cleanupExpiredVideos(settings) {
-    const days = Number(settings.autoCleanupDays) || 0;
-    if (days <= 0) return;
+  function setAllVideos(videos) {
+    allVideos = videos;
+    cachedStorageSize = estimateSize(allVideos);
+  }
 
-    const videos = await getAllVideoData();
+  async function cleanupExpiredVideos(settings, videos = null) {
+    const days = Number(settings.autoCleanupDays) || 0;
+    if (days <= 0) return videos;
+
+    const source = videos || await getAllVideoData();
     const threshold = Date.now() - days * 86400000;
-    const expiredKeys = videos
-      .filter((video) => (video.timestamp || 0) < threshold)
-      .map((video) => video.storageKey);
+    const expiredKeys = [];
+    const remaining = [];
+
+    for (const video of source) {
+      if ((video.timestamp || 0) < threshold) {
+        expiredKeys.push(video.storageKey);
+      } else {
+        remaining.push(video);
+      }
+    }
 
     if (expiredKeys.length > 0) {
       await chrome.storage.local.remove(expiredKeys);
     }
+
+    return remaining;
   }
 
   // 動画を開く（既存タブがあればそちらに切替、なければ新規タブ）
@@ -182,13 +227,13 @@
     const sizeEl = document.getElementById('storageSize');
     const deleteAllBtn = document.getElementById('deleteAllBtn');
 
-    listEl.innerHTML = '';
+    listEl.replaceChildren();
 
     // ストレージ情報
     const displayedCount = videos.length === allVideos.length ? String(videos.length) : `${videos.length} / ${allVideos.length}`;
     const countLabel = (chrome.i18n.getMessage('popupVideoCount') || '{n}件の動画').replace('{n}', displayedCount);
     countEl.textContent = countLabel;
-    sizeEl.textContent = `≈ ${formatBytes(estimateSize(allVideos))}`;
+    sizeEl.textContent = `≈ ${formatBytes(cachedStorageSize)}`;
 
     if (videos.length === 0) {
       emptyEl.style.display = 'block';
@@ -201,6 +246,8 @@
     listEl.style.display = 'flex';
     deleteAllBtn.disabled = false;
 
+    const fragment = document.createDocumentFragment();
+
     videos.forEach((v) => {
       const item = document.createElement('div');
       item.className = 'video-item';
@@ -208,14 +255,13 @@
       const info = document.createElement('div');
       info.className = 'video-info';
       info.title = chrome.i18n.getMessage('popupOpenVideo') || 'YouTubeで開く';
-      info.addEventListener('click', () => {
-        openVideo(v.videoId);
-      });
+      info.addEventListener('click', withErrorBoundary(() => openVideo(v.videoId)));
 
       const title = document.createElement('div');
       title.className = 'video-title';
       // タイトルから " - YouTube" を除去
-      const displayTitle = (v.title || v.videoId).replace(/ - YouTube$/, '');
+      const rawTitle = typeof v.title === 'string' ? v.title : v.videoId;
+      const displayTitle = rawTitle.replace(/ - YouTube$/, '');
       title.textContent = displayTitle;
 
       const meta = document.createElement('div');
@@ -233,16 +279,18 @@
       deleteBtn.className = 'delete-btn';
       deleteBtn.textContent = '✕';
       deleteBtn.title = chrome.i18n.getMessage('popupDelete') || '削除';
-      deleteBtn.addEventListener('click', async () => {
+      deleteBtn.addEventListener('click', withErrorBoundary(async () => {
         await chrome.storage.local.remove(v.storageKey);
         item.remove();
         await refreshVideoList();
-      });
+      }));
 
       item.appendChild(info);
       item.appendChild(deleteBtn);
-      listEl.appendChild(item);
+      fragment.appendChild(item);
     });
+
+    listEl.appendChild(fragment);
   }
 
   function getFilteredVideos() {
@@ -251,14 +299,14 @@
     if (!query) return allVideos;
 
     return allVideos.filter((v) => {
-      const title = (v.title || '').toLowerCase();
+      const title = (typeof v.title === 'string' ? v.title : '').toLowerCase();
       const id = v.videoId.toLowerCase();
       return title.includes(query) || id.includes(query);
     });
   }
 
-  async function refreshVideoList() {
-    allVideos = await getAllVideoData();
+  async function refreshVideoList(preloadedVideos = null) {
+    setAllVideos(preloadedVideos || await getAllVideoData());
     renderVideoList(getFilteredVideos());
   }
 
@@ -302,32 +350,29 @@
   }
 
   async function importData(file) {
-    const text = await file.text();
-    const payload = JSON.parse(text);
-    const videos = Array.isArray(payload.videos) ? payload.videos : [];
-    const importableVideos = videos.filter((video) => video && isValidVideoId(video.videoId));
-    const hasImportableSettings = payload.settings && typeof payload.settings === 'object';
-
-    if (importableVideos.length === 0 && !hasImportableSettings) {
-      throw new Error('Invalid import file');
+    if (file.size > Shared.MAX_IMPORT_BYTES) {
+      throw new Error('Import file too large');
     }
+
+    const text = await file.text();
+    const parsed = Shared.parseImportPayload(text, file.size);
 
     const confirmMsg = chrome.i18n.getMessage('settingsImportConfirm') || '保存データをインポートしますか？';
     if (!confirm(confirmMsg)) return;
 
     const updates = {};
 
-    importableVideos.forEach((video) => {
+    parsed.videos.forEach((video) => {
       updates[STORAGE_KEY_PREFIX + video.videoId] = {
-        position: Number(video.position) || 0,
-        duration: Number(video.duration) || 0,
-        timestamp: Number(video.timestamp) || Date.now(),
-        title: video.title || video.videoId
+        position: video.position,
+        duration: video.duration,
+        timestamp: video.timestamp,
+        title: video.title
       };
     });
 
-    if (hasImportableSettings) {
-      updates[SETTINGS_KEY] = { ...DEFAULT_SETTINGS, ...payload.settings };
+    if (parsed.settings) {
+      updates[SETTINGS_KEY] = parsed.settings;
     }
 
     if (Object.keys(updates).length > 0) {
@@ -354,56 +399,56 @@
     updateToggleLabel(toggle.checked, toggleLabel);
     applySettingsToForm(settings);
 
-    toggle.addEventListener('change', async () => {
+    toggle.addEventListener('change', withErrorBoundary(async () => {
       settings = await updateSettings({ enabled: toggle.checked });
       updateToggleLabel(toggle.checked, toggleLabel);
-    });
+    }));
 
     document.getElementById('settingsBtn').addEventListener('click', showSettingsView);
     document.getElementById('backBtn').addEventListener('click', showMainView);
 
-    document.getElementById('notifyOnRestore').addEventListener('change', async (event) => {
+    document.getElementById('notifyOnRestore').addEventListener('change', withErrorBoundary(async (event) => {
       settings = await updateSettings({ notifyOnRestore: event.target.checked });
-    });
-    document.getElementById('autoPlayOnRestore').addEventListener('change', async (event) => {
+    }));
+    document.getElementById('autoPlayOnRestore').addEventListener('change', withErrorBoundary(async (event) => {
       settings = await updateSettings({ autoPlayOnRestore: event.target.checked });
-    });
-    document.getElementById('minSaveSeconds').addEventListener('change', async (event) => {
+    }));
+    document.getElementById('minSaveSeconds').addEventListener('change', withErrorBoundary(async (event) => {
       settings = await updateSettings({ minSaveSeconds: Number(event.target.value) });
-    });
-    document.getElementById('autoDeleteWatched').addEventListener('change', async (event) => {
+    }));
+    document.getElementById('autoDeleteWatched').addEventListener('change', withErrorBoundary(async (event) => {
       settings = await updateSettings({ autoDeleteWatched: event.target.checked });
-    });
-    document.getElementById('saveIntervalSeconds').addEventListener('change', async (event) => {
+    }));
+    document.getElementById('saveIntervalSeconds').addEventListener('change', withErrorBoundary(async (event) => {
       settings = await updateSettings({ saveIntervalSeconds: Number(event.target.value) });
-    });
-    document.getElementById('autoCleanupDays').addEventListener('change', async (event) => {
+    }));
+    document.getElementById('autoCleanupDays').addEventListener('change', withErrorBoundary(async (event) => {
       settings = await updateSettings({ autoCleanupDays: Number(event.target.value) });
-      await cleanupExpiredVideos(settings);
-      await refreshVideoList();
-    });
-    document.getElementById('openVideoMode').addEventListener('change', async (event) => {
+      const remaining = await cleanupExpiredVideos(settings, allVideos);
+      await refreshVideoList(remaining);
+    }));
+    document.getElementById('openVideoMode').addEventListener('change', withErrorBoundary(async (event) => {
       settings = await updateSettings({ openVideoMode: event.target.value });
-    });
+    }));
 
     // 全削除
     const deleteAllBtn = document.getElementById('deleteAllBtn');
-    deleteAllBtn.addEventListener('click', async () => {
+    deleteAllBtn.addEventListener('click', withErrorBoundary(async () => {
       const confirmMsg = chrome.i18n.getMessage('popupDeleteAllConfirm') || 'すべての保存データを削除しますか？';
       if (!confirm(confirmMsg)) return;
 
       const videos = await getAllVideoData();
       const keys = videos.map((v) => v.storageKey);
       await chrome.storage.local.remove(keys);
-      allVideos = [];
+      setAllVideos([]);
       renderVideoList([]);
-    });
+    }));
 
-    document.getElementById('exportBtn').addEventListener('click', exportData);
+    document.getElementById('exportBtn').addEventListener('click', withErrorBoundary(exportData));
     document.getElementById('importBtn').addEventListener('click', () => {
       document.getElementById('importFile').click();
     });
-    document.getElementById('importFile').addEventListener('change', async (event) => {
+    document.getElementById('importFile').addEventListener('change', withErrorBoundary(async (event) => {
       const file = event.target.files[0];
       event.target.value = '';
       if (!file) return;
@@ -414,16 +459,23 @@
         const msg = chrome.i18n.getMessage('settingsImportError') || 'インポートできませんでした';
         alert(msg);
       }
-    });
+    }));
 
-    // 動画リスト表示
-    await cleanupExpiredVideos(settings);
-    await refreshVideoList();
+    // 動画リスト表示（自動整理後の配列をそのまま使い、再取得を省く）
+    const videos = await getAllVideoData();
+    const remaining = await cleanupExpiredVideos(settings, videos);
+    await refreshVideoList(remaining || videos);
 
-    // 検索フィルター
+    // 検索フィルター（debounce）
     const searchInput = document.getElementById('searchInput');
     searchInput.addEventListener('input', () => {
-      renderVideoList(getFilteredVideos());
+      if (searchDebounceTimerId) {
+        clearTimeout(searchDebounceTimerId);
+      }
+      searchDebounceTimerId = setTimeout(() => {
+        searchDebounceTimerId = null;
+        renderVideoList(getFilteredVideos());
+      }, SEARCH_DEBOUNCE_MS);
     });
   }
 
@@ -435,5 +487,7 @@
     }
   }
 
-  document.addEventListener('DOMContentLoaded', initPopup);
+  document.addEventListener('DOMContentLoaded', () => {
+    void initPopup().catch(showFatalError);
+  });
 })();
