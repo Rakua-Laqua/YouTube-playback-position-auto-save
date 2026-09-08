@@ -1,0 +1,8 @@
+﻿node_modules/
+*.zip
+.claude/
+
+# OS / Editor files
+.DS_Store
+Thumbs.db
+*.log
