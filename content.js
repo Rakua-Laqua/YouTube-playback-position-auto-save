@@ -8,7 +8,7 @@
     return;
   }
 
-  const CONTENT_SCRIPT_VERSION = '1.9.1-invalidate-init-20260719';
+  const CONTENT_SCRIPT_VERSION = '1.9.1-save-guards-20260908';
   const existingController = window.__ytPositionSaverController;
 
   if (existingController?.version === CONTENT_SCRIPT_VERSION) {
@@ -100,6 +100,8 @@
     detachActiveMedia();
     sessionGeneration += 1;
     activeSession = Shared.createVideoSession(sessionGeneration, videoId);
+    activeSession.restorePending = true;
+    lastValidPosition = null;
     return activeSession;
   }
 
@@ -109,15 +111,18 @@
     sessionGeneration += 1;
     activeSession = Shared.createVideoSession(sessionGeneration, null);
     currentVideoId = null;
+    lastValidPosition = null;
   }
 
   function sessionMatches(session, videoRef) {
     if (!session || activeSession !== session) return false;
+    if (session.navigationStarted || getVideoId() !== session.videoId) return false;
     return Shared.isCurrentSession(session, session.generation, videoRef);
   }
 
   function isOwnedVideoEvent(event) {
     const target = event?.currentTarget;
+    if (!sessionMatches(activeSession, target)) return false;
     if (!Shared.eventMatchesSession(activeSession, target)) return false;
     if (video !== target) return false;
     if (!currentVideoId || currentVideoId !== activeSession.videoId) return false;
@@ -125,6 +130,11 @@
   }
 
   // イベントハンドラー（削除用に参照を保持）
+  function isSaveBlocked(session = activeSession) {
+    return settingsLoadFailed || settingsCache.enabled === false ||
+      session.restorePending || session.isRestoring;
+  }
+
   function handlePause(event) {
     if (!isOwnedVideoEvent(event)) return;
     savePositionOnPause();
@@ -133,6 +143,7 @@
   function handleTimeUpdate(event) {
     if (!isOwnedVideoEvent(event)) return;
     if (isAdPlaying(event.currentTarget)) return;
+    if (isSaveBlocked()) return;
     // 動画終了済みの場合は位置を更新しない
     if (hasEnded) return;
 
@@ -157,6 +168,7 @@
   }
 
   async function handleEnded(event) {
+    if (isSaveBlocked()) return;
     if (event && !isOwnedVideoEvent(event)) return;
     if (isAdPlaying(event?.currentTarget || video)) return;
 
@@ -301,6 +313,7 @@
 
     if (now - session.restoreRetryStartedAt > AD_RESTORE_MAX_WAIT_MS) {
       session.restoreRetryStartedAt = 0;
+      session.restorePending = false;
       console.log('[YouTube再生位置保存] 広告終了待ちがタイムアウトしたため復元をスキップ');
       return;
     }
@@ -350,9 +363,12 @@
 
   // セッション不一致時はグローバル/新セッション状態を変更せず return する
   function finishRestore(session, options = {}) {
+    if (!sessionMatches(session)) return;
     const { resumeIfPaused = false, targetVideo = null } = options;
     const result = Shared.finishSessionRestore(session, activeSession, { resumeIfPaused });
     if (!result.applied) return;
+    // 広告待ちでは再生を再開しても、復元の再試行が終わるまで保存しない。
+    session.restorePending = !!session.restoreRetryTimerId;
 
     if (result.shouldResume && targetVideo && targetVideo.paused) {
       targetVideo.play().catch((e) => {
@@ -373,7 +389,7 @@
     if (currentVideoId !== targetVideoId || session.videoId !== targetVideoId) return;
 
     // 復元中は保存しない
-    if (session.isRestoring) return;
+    if (isSaveBlocked(session)) return;
 
     // 広告中は広告動画の位置・長さを保存しない
     if (isAdPlaying(targetVideo)) return;
@@ -481,7 +497,9 @@
   // メモリに保持した最後の位置を保存（ページ遷移時用）
   async function saveLastValidPosition(snapshot) {
     if (!isExtensionValid()) return;
+    if (isSaveBlocked()) return;
     if (!snapshot) return;
+    if (snapshot.videoId !== activeSession.videoId) return;
 
     try {
       await chrome.storage.local.set({ [getStorageKey(snapshot.videoId)]: snapshot.data });
@@ -645,6 +663,7 @@
       return;
     }
 
+    session.restorePending = true;
     try {
       const loaded = await loadStoredRestoreData(session, context);
       if (loaded.status !== 'continue') return;
@@ -866,7 +885,7 @@
     }
 
     // 同じ動画でも <video> が再作成されている場合はリスナーを張り直す
-    if (videoId === currentVideoId && activeSession.videoId === videoId) {
+    if (videoId === currentVideoId && activeSession.videoId === videoId && !activeSession.navigationStarted) {
       const session = activeSession;
       if (setupVideo(session)) {
         updateLiveStatus();
@@ -902,19 +921,27 @@
     void saveForNavigation();
   }
 
+  function handleYtNavigateStart() {
+    // URL変更やvideo再利用に先立って旧イベント・復元・initを失効させる。
+    invalidateInitRequests();
+    activeSession.navigationStarted = true;
+    Shared.clearSessionTimers(activeSession);
+    detachActiveMedia();
+    void saveForNavigation();
+  }
+
   function handleYtNavigateFinish() {
     lastNavigateFinishAt = Date.now();
-    void saveForNavigation();
+    handleYtNavigateStart();
     scheduleInit(0);
   }
 
   function handlePopState() {
-    void saveForNavigation();
-
     // yt-navigate-finish直後のpopstateは二重初期化になりやすいので抑止
     const now = Date.now();
-    if (now - lastNavigateFinishAt < 250) return;
+    if (now - lastNavigateFinishAt < 250 && getVideoId() === activeSession.videoId) return;
 
+    handleYtNavigateStart();
     scheduleInit(POPSTATE_INIT_DELAY_MS);
   }
 
@@ -963,6 +990,7 @@
     cleanupVideoListeners();
 
     window.removeEventListener('beforeunload', handleBeforeUnload);
+    window.removeEventListener('yt-navigate-start', handleYtNavigateStart);
     window.removeEventListener('yt-navigate-finish', handleYtNavigateFinish);
     window.removeEventListener('popstate', handlePopState);
     document.removeEventListener('visibilitychange', handleVisibilityChange);
@@ -987,6 +1015,7 @@
   window.addEventListener('beforeunload', handleBeforeUnload);
 
   // YouTubeのナビゲーションイベントを使用（MutationObserverより効率的）
+  window.addEventListener('yt-navigate-start', handleYtNavigateStart);
   window.addEventListener('yt-navigate-finish', handleYtNavigateFinish);
 
   // popstate（戻る/進むボタン）でも動作
