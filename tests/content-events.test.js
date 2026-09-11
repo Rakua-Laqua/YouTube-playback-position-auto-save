@@ -23,7 +23,7 @@ function eventTarget() {
   };
 }
 
-async function harness({ stored, ad = false, holdRead = false, readyState = 1 } = {}) {
+async function harness({ stored, ad = false, holdRead = false, readyState = 1, settings = {} } = {}) {
   const timers = new Map();
   let nextTimer = 0;
   const setTimer = (fn, delay, repeat = false) => {
@@ -55,7 +55,7 @@ async function harness({ stored, ad = false, holdRead = false, readyState = 1 } 
       local: {
         async get(key) {
           if (key === 'yt_position_settings') {
-            return { [key]: { enabled: true, notifyOnRestore: false } };
+            return { [key]: { enabled: true, notifyOnRestore: false, ...settings } };
           }
           if (holdRead) await new Promise(resolve => reads.push(resolve));
           return { [key]: data[key] && { ...data[key] } };
@@ -94,6 +94,43 @@ async function harness({ stored, ad = false, holdRead = false, readyState = 1 } 
     hide() { document.hidden = true; document.emit('visibilitychange'); }
   };
 }
+
+for (const { minSaveSeconds, duration, shouldSave } of [
+  { minSaveSeconds: 10, duration: 5, shouldSave: false },
+  { minSaveSeconds: 10, duration: 10, shouldSave: true },
+  { minSaveSeconds: 0, duration: 5, shouldSave: true }
+]) {
+  it(`completed video of ${duration}s respects minimum ${minSaveSeconds}s when retained`, async () => {
+    const h = await harness({ settings: { minSaveSeconds, autoDeleteWatched: false } });
+    h.video.duration = duration;
+    h.video.currentTime = duration;
+    h.video.emit('ended');
+    await h.flush();
+    h.hide();
+    await h.flush();
+
+    if (shouldSave) {
+      assert.equal(h.data.yt_position_AAAAAAAAAAA.position, duration);
+    } else {
+      assert.equal(h.writes.length, 0);
+      assert.equal(h.data.yt_position_AAAAAAAAAAA, undefined);
+    }
+    assert.deepEqual(h.removals, []);
+  });
+}
+
+it('completed video is still deleted below the minimum when automatic deletion is enabled', async () => {
+  const h = await harness({ settings: { minSaveSeconds: 10, autoDeleteWatched: true } });
+  h.data.yt_position_AAAAAAAAAAA = { position: 2, duration: 5, timestamp: Date.now(), title: 'Video A' };
+  h.video.duration = 5;
+  h.video.currentTime = 5;
+  h.video.emit('ended');
+  await h.flush();
+
+  assert.equal(h.writes.length, 0);
+  assert.equal(h.data.yt_position_AAAAAAAAAAA, undefined);
+  assert.deepEqual(h.removals, ['yt_position_AAAAAAAAAAA']);
+});
 
 it('real content events freeze A before the same video element becomes B', async () => {
   const h = await harness();

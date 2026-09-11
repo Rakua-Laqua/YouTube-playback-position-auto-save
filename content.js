@@ -453,8 +453,11 @@
     const currentTime = targetVideo.currentTime;
     if (!isValidDuration(duration) || !isValidPosition(currentTime)) return;
 
+    const position = Math.min(currentTime, duration);
+    if (!isPastMinimumSaveTime(position)) return;
+
     const data = {
-      position: Math.min(currentTime, duration),
+      position: position,
       duration: duration,
       timestamp: Date.now(),
       title: document.title
