@@ -1,6 +1,6 @@
 {
   "name": "youtube-playback-position-auto-save",
-  "version": "1.9.2",
+  "version": "1.9.3",
   "private": true,
   "description": "YouTube 再生位置自動保存 ブラウザ拡張機能",
   "scripts": {
