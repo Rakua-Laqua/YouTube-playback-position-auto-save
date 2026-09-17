@@ -178,7 +178,11 @@
       restoreRetryTimerId: null,
       restoreRetryStartedAt: 0,
       isRestoring: false,
-      pausedForPendingRestore: false
+      pausedForPendingRestore: false,
+      prefetchPromise: null,
+      preMuted: false,
+      originalMuted: false,
+      restoreCompleted: false
     };
   }
 
@@ -236,6 +240,51 @@
     return requestId === latestRequestId;
   }
 
+  // URLパラメータ（t, start）の秒数解析（例: "120", "120s", "1m30s", "1h2m3s"）
+  function parseTimestampParam(val) {
+    if (!val || typeof val !== 'string') return null;
+    const str = val.trim();
+    if (!str) return null;
+
+    const secMatch = str.match(/^(\d+(?:\.\d+)?)s?$/);
+    if (secMatch) {
+      const num = parseFloat(secMatch[1]);
+      return Number.isFinite(num) && num > 0 ? num : null;
+    }
+
+    const timeRegex = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/;
+    const match = str.match(timeRegex);
+    if (match && (match[1] || match[2] || match[3])) {
+      const hours = parseInt(match[1] || '0', 10);
+      const minutes = parseInt(match[2] || '0', 10);
+      const seconds = parseInt(match[3] || '0', 10);
+      const total = hours * 3600 + minutes * 60 + seconds;
+      return total > 0 ? total : null;
+    }
+
+    return null;
+  }
+
+  // URLに有効なタイムスタンプ指定が存在するか
+  function hasUrlTimestamp(searchParams) {
+    if (!searchParams) return false;
+    const t = typeof searchParams.get === 'function' ? searchParams.get('t') : searchParams['t'];
+    if (parseTimestampParam(t) !== null) return true;
+    const start = typeof searchParams.get === 'function' ? searchParams.get('start') : searchParams['start'];
+    if (parseTimestampParam(start) !== null) return true;
+    return false;
+  }
+
+  // 一時消音を解除して元のミュート状態を復元する
+  function unmarkPreMute(session, videoRef) {
+    if (!session || !session.preMuted) return;
+    session.preMuted = false;
+    const target = videoRef || session.videoRef;
+    if (target) {
+      target.muted = !!session.originalMuted;
+    }
+  }
+
   const api = {
     DEFAULT_SETTINGS,
     YOUTUBE_VIDEO_ID_PATTERN,
@@ -255,7 +304,10 @@
     clearSnapshotIfSame,
     canMutateSessionRestoreState,
     finishSessionRestore,
-    isLatestInitRequest
+    isLatestInitRequest,
+    parseTimestampParam,
+    hasUrlTimestamp,
+    unmarkPreMute
   };
 
   root.YtPositionSaverShared = api;

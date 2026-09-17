@@ -1,4 +1,4 @@
-# YouTube 再生位置自動保存 v1.9.2
+# YouTube 再生位置自動保存 v1.10.0
 
 日本語 | [English](README.en.md)
 

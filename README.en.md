@@ -1,4 +1,4 @@
-# YouTube Playback Position Auto Save v1.9.2
+# YouTube Playback Position Auto Save v1.10.0
 
 [日本語](README.md) | English
 

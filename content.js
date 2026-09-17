@@ -96,16 +96,29 @@
 
   function beginSession(videoId) {
     // セッション内タイマーに加え、定期保存・旧videoリスナーも必ず止める
+    if (activeSession?.preMuted && activeSession?.videoRef) {
+      Shared.unmarkPreMute(activeSession, activeSession.videoRef);
+    }
     Shared.clearSessionTimers(activeSession);
     detachActiveMedia();
     sessionGeneration += 1;
     activeSession = Shared.createVideoSession(sessionGeneration, videoId);
     activeSession.restorePending = true;
     lastValidPosition = null;
+    if (videoId && isExtensionValid()) {
+      const storageKey = getStorageKey(videoId);
+      activeSession.prefetchPromise = chrome.storage.local.get(storageKey).catch((e) => {
+        console.warn('[YouTube再生位置保存] プリフェッチ失敗:', e.message || e);
+        return null;
+      });
+    }
     return activeSession;
   }
 
   function discardSession() {
+    if (activeSession?.preMuted && activeSession?.videoRef) {
+      Shared.unmarkPreMute(activeSession, activeSession.videoRef);
+    }
     Shared.clearSessionTimers(activeSession);
     detachActiveMedia();
     sessionGeneration += 1;
@@ -365,13 +378,18 @@
   function finishRestore(session, options = {}) {
     if (!sessionMatches(session)) return;
     const { resumeIfPaused = false, targetVideo = null } = options;
+    const effectiveVideo = targetVideo || session.videoRef;
+    Shared.unmarkPreMute(session, effectiveVideo);
     const result = Shared.finishSessionRestore(session, activeSession, { resumeIfPaused });
     if (!result.applied) return;
     // 広告待ちでは再生を再開しても、復元の再試行が終わるまで保存しない。
     session.restorePending = !!session.restoreRetryTimerId;
+    if (!session.restoreRetryTimerId) {
+      session.restoreCompleted = true;
+    }
 
-    if (result.shouldResume && targetVideo && targetVideo.paused) {
-      targetVideo.play().catch((e) => {
+    if (result.shouldResume && effectiveVideo && effectiveVideo.paused) {
+      effectiveVideo.play().catch((e) => {
         console.warn('[YouTube再生位置保存] 復元スキップ後の再生再開がブロックされました:', e.message || e);
       });
     }
@@ -551,12 +569,14 @@
       return { status: 'finished' };
     }
 
-    const result = await chrome.storage.local.get(storageKey);
+    const result = session?.prefetchPromise
+      ? await session.prefetchPromise
+      : await chrome.storage.local.get(storageKey);
     if (guardRestoreSession(session, targetVideo) === 'aborted') {
       return { status: 'aborted' };
     }
 
-    const data = result[storageKey];
+    const data = result?.[storageKey];
     if (!data || !data.position) {
       finishRestore(session, { resumeIfPaused: true, targetVideo });
       return { status: 'finished' };
@@ -634,6 +654,8 @@
   function completeRestore(session, context, data) {
     const { targetVideo } = context;
 
+    Shared.unmarkPreMute(session, targetVideo);
+
     if (settingsCache.autoPlayOnRestore) {
       targetVideo.play().catch((e) => {
         console.warn('[YouTube再生位置保存] 自動再生がブロックされました:', e.message || e);
@@ -666,6 +688,8 @@
       return;
     }
 
+    if (session.restoreCompleted || session.isRestoreRunning) return;
+    session.isRestoreRunning = true;
     session.restorePending = true;
     try {
       const loaded = await loadStoredRestoreData(session, context);
@@ -683,6 +707,8 @@
         finishRestore(session, { resumeIfPaused: true, targetVideo });
       }
       console.warn('[YouTube再生位置保存] 復元処理でエラー:', e.message || e);
+    } finally {
+      if (session) session.isRestoreRunning = false;
     }
   }
 
@@ -824,38 +850,76 @@
 
   async function prepareAndRestore(session) {
     if (!sessionMatches(session, session.videoRef)) return;
+    if (session.restoreCompleted) return;
 
     updateLiveStatus();
 
     if (stopIfExtensionInvalid()) return;
 
+    const targetVideo = session.videoRef;
     const capturedVideoId = session.videoId;
     const storageKey = getStorageKey(capturedVideoId);
+
+    // URLに開始位置パラメータ（?t=, ?start=）がある場合はYouTube標準のシーク再生を優先
+    const urlParams = new URLSearchParams(window.location.search);
+    if (Shared.hasUrlTimestamp(urlParams)) {
+      console.log('[YouTube再生位置保存] URLに開始位置パラメータがあるため復元をスキップ');
+      finishRestore(session, { resumeIfPaused: true, targetVideo });
+      if (sessionMatches(session, targetVideo)) startSaving();
+      return;
+    }
+
+    // 広告や配信中ライブでない場合、ストレージ読み込み待ちの間の音漏れ（二度再生）を防ぐため一時消音
+    const canPreMute = !isAdPlaying(targetVideo) && !isActiveLiveVideo() && !targetVideo.muted;
+    if (canPreMute) {
+      session.originalMuted = targetVideo.muted;
+      session.preMuted = true;
+      targetVideo.muted = true;
+    }
+
     let hasRestorableStoredPosition = false;
     try {
-      const result = await chrome.storage.local.get(storageKey);
-      if (!sessionMatches(session, session.videoRef)) return;
-      hasRestorableStoredPosition = isValidStoredPosition(result[storageKey]) && !isActiveLiveVideo();
+      const result = session.prefetchPromise
+        ? await session.prefetchPromise
+        : await chrome.storage.local.get(storageKey);
+      if (!sessionMatches(session, targetVideo)) {
+        Shared.unmarkPreMute(session, targetVideo);
+        return;
+      }
+      hasRestorableStoredPosition = isValidStoredPosition(result?.[storageKey]) && !isActiveLiveVideo();
     } catch (e) {
       console.warn('[YouTube再生位置保存] 保存データ確認失敗:', e.message || e);
     }
 
-    if (!sessionMatches(session, session.videoRef)) return;
+    if (!sessionMatches(session, targetVideo)) {
+      Shared.unmarkPreMute(session, targetVideo);
+      return;
+    }
+
+    // 保存データがない場合は、即座に一時消音を解除して通常再生を継続（play/pauseは触らない）
+    if (!hasRestorableStoredPosition) {
+      Shared.unmarkPreMute(session, targetVideo);
+      finishRestore(session, { resumeIfPaused: false, targetVideo });
+      if (sessionMatches(session, targetVideo)) startSaving();
+      return;
+    }
 
     // 復元可能な保存データがある場合は復元前の保存を抑止してから一時停止
     // （pause イベントで現在位置=0付近が保存され、復元データを上書きするのを防ぐ）
-    if (hasRestorableStoredPosition && !isAdPlaying(session.videoRef)) {
+    if (!isAdPlaying(targetVideo)) {
       session.isRestoring = true;
-      pauseForRestore(session, session.videoRef);
+      pauseForRestore(session, targetVideo);
     }
 
-    const targetVideo = session.videoRef;
     if (targetVideo.readyState >= 1) {
       await restorePosition(session);
       if (sessionMatches(session, targetVideo)) startSaving();
     } else {
       targetVideo.addEventListener('loadedmetadata', async () => {
-        if (!sessionMatches(session, targetVideo)) return;
+        if (!sessionMatches(session, targetVideo)) {
+          Shared.unmarkPreMute(session, targetVideo);
+          return;
+        }
         await restorePosition(session);
         if (sessionMatches(session, targetVideo)) startSaving();
       }, { once: true });
@@ -935,6 +999,11 @@
 
   function handleYtNavigateFinish() {
     lastNavigateFinishAt = Date.now();
+    const newVideoId = getVideoId();
+    if (newVideoId && activeSession.videoId === newVideoId && !activeSession.navigationStarted) {
+      scheduleInit(0);
+      return;
+    }
     handleYtNavigateStart();
     scheduleInit(0);
   }
@@ -989,6 +1058,9 @@
     // 実行中/保留中の init を無効化し、cleanup 後の beginSession を防ぐ
     invalidateInitRequests();
     stopSaving();
+    if (activeSession?.preMuted) {
+      Shared.unmarkPreMute(activeSession, video || activeSession?.videoRef);
+    }
     Shared.clearSessionTimers(activeSession);
     cleanupVideoListeners();
 

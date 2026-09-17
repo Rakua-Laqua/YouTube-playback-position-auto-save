@@ -213,3 +213,50 @@ describe('session helpers', () => {
     clearInterval(newSession.checkIntervalId);
   });
 });
+
+describe('URL timestamp and pre-mute helpers', () => {
+  it('parses various timestamp parameters', () => {
+    assert.equal(Shared.parseTimestampParam('120'), 120);
+    assert.equal(Shared.parseTimestampParam('120s'), 120);
+    assert.equal(Shared.parseTimestampParam('1m30s'), 90);
+    assert.equal(Shared.parseTimestampParam('1h2m3s'), 3723);
+    assert.equal(Shared.parseTimestampParam('2m'), 120);
+    assert.equal(Shared.parseTimestampParam('45s'), 45);
+    assert.equal(Shared.parseTimestampParam('0'), null);
+    assert.equal(Shared.parseTimestampParam('0s'), null);
+    assert.equal(Shared.parseTimestampParam('invalid'), null);
+    assert.equal(Shared.parseTimestampParam(null), null);
+    assert.equal(Shared.parseTimestampParam(undefined), null);
+  });
+
+  it('detects URL timestamp parameters', () => {
+    assert.equal(Shared.hasUrlTimestamp(new URLSearchParams('v=abc12345678&t=90')), true);
+    assert.equal(Shared.hasUrlTimestamp(new URLSearchParams('v=abc12345678&t=1m30s')), true);
+    assert.equal(Shared.hasUrlTimestamp(new URLSearchParams('v=abc12345678&start=60')), true);
+    assert.equal(Shared.hasUrlTimestamp(new URLSearchParams('v=abc12345678')), false);
+    assert.equal(Shared.hasUrlTimestamp(new URLSearchParams('v=abc12345678&t=0')), false);
+    assert.equal(Shared.hasUrlTimestamp(null), false);
+  });
+
+  it('unmarks pre-mute and restores original muted state', () => {
+    const session = Shared.createVideoSession(1, 'vid12345678');
+    const fakeVideo = { muted: true };
+
+    session.preMuted = true;
+    session.originalMuted = false;
+    Shared.unmarkPreMute(session, fakeVideo);
+
+    assert.equal(session.preMuted, false);
+    assert.equal(fakeVideo.muted, false);
+
+    // If original was muted, keeps muted
+    session.preMuted = true;
+    session.originalMuted = true;
+    fakeVideo.muted = true;
+    Shared.unmarkPreMute(session, fakeVideo);
+
+    assert.equal(session.preMuted, false);
+    assert.equal(fakeVideo.muted, true);
+  });
+});
+

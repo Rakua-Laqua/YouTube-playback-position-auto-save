@@ -23,17 +23,17 @@ function eventTarget() {
   };
 }
 
-async function harness({ stored, ad = false, holdRead = false, readyState = 1, settings = {} } = {}) {
+async function harness({ stored, ad = false, holdRead = false, readyState = 1, settings = {}, search = '?v=AAAAAAAAAAA' } = {}) {
   const timers = new Map();
   let nextTimer = 0;
   const setTimer = (fn, delay, repeat = false) => {
     timers.set(++nextTimer, { fn, delay, repeat });
     return nextTimer;
   };
-  const window = Object.assign(eventTarget(), { location: { search: '?v=AAAAAAAAAAA' } });
+  const window = Object.assign(eventTarget(), { location: { search } });
   const player = { classList: { contains: () => ad } };
   const video = Object.assign(eventTarget(), {
-    currentTime: 0, duration: 600, readyState, paused: false,
+    currentTime: 0, duration: 600, readyState, paused: false, muted: false,
     closest: () => player,
     pause() { this.paused = true; this.emit('pause'); },
     play() { this.paused = false; return Promise.resolve(); }
@@ -270,3 +270,59 @@ it('popstate immediately after navigate-finish still initializes the new video',
   await h.flush();
   assert.equal(h.data.yt_position_BBBBBBBBBBB.position, 40);
 });
+
+it('skips restore when URL has explicit timestamp parameter', async () => {
+  const h = await harness({
+    search: '?v=AAAAAAAAAAA&t=120',
+    stored: { position: 300, duration: 600 }
+  });
+  await h.flush();
+  // 復元がスキップされ、300秒への上書きシークは発生しない
+  assert.equal(h.video.currentTime, 0);
+  assert.equal(h.video.muted, false);
+});
+
+it('temporarily mutes video during storage read and un-mutes without pausing when no stored data', async () => {
+  const h = await harness({ holdRead: true });
+  // ストレージ読み込み待ち中: 消音ガードが効いている
+  assert.equal(h.video.muted, true);
+  // ストレージ読み出し完了（データなし）
+  h.releaseReads();
+  await h.flush();
+  // 消音解除され、再生状態（paused=false）のまま維持される
+  assert.equal(h.video.muted, false);
+  assert.equal(h.video.paused, false);
+});
+
+it('temporarily mutes video during storage read and un-mutes after seeking to saved position', async () => {
+  const h = await harness({ stored: { position: 300, duration: 600 }, holdRead: true });
+  // ストレージ読み込み待ち中: 消音ガードが効いている
+  assert.equal(h.video.muted, true);
+  // ストレージ読み出し完了
+  h.releaseReads();
+  await h.flush();
+  // シークが開始され、シーク完了イベントを発火
+  h.video.emit('seeked');
+  await h.flush();
+  // 復元位置へシークされ、消音も解除されている
+  assert.equal(h.video.currentTime, 300);
+  assert.equal(h.video.muted, false);
+});
+
+it('does not repeat restore when yt-navigate-finish fires on initial load for the same video', async () => {
+  const h = await harness({ stored: { position: 300, duration: 600 } });
+  // 1回目の復元完了
+  assert.equal(h.video.currentTime, 300);
+
+  // 動画が進む
+  h.video.currentTime = 305;
+
+  // 初期ロード完了により YouTube が yt-navigate-finish を発火
+  h.window.emit('yt-navigate-finish');
+  await h.flush();
+
+  // 二度目の復元（300秒への巻き戻し）は発生せず、現在の再生位置（305秒）が維持される
+  assert.equal(h.video.currentTime, 305);
+});
+
+
