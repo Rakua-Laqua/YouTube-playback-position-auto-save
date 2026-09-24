@@ -284,6 +284,10 @@ header h1 {
   border-color: #ff6b6b;
 }
 
+.diag-description {
+  margin-bottom: 8px;
+}
+
 .data-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;

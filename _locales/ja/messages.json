@@ -224,5 +224,29 @@
   "popupOperationError": {
     "message": "操作に失敗しました。もう一度お試しください。",
     "description": "ポップアップ操作失敗メッセージ"
+  },
+  "settingsSectionDiag": {
+    "message": "診断ログ（一時的）",
+    "description": "診断ログセクション"
+  },
+  "settingsDiagDesc": {
+    "message": "プレイリストの復元位置を調べるため、YouTubeタブのURLの変化とChrome起動時のタブを記録しています（最大500件、この端末内にのみ保存）。",
+    "description": "診断ログの説明"
+  },
+  "settingsDiagExport": {
+    "message": "ログを書き出す",
+    "description": "診断ログのエクスポート"
+  },
+  "settingsDiagClear": {
+    "message": "ログを削除",
+    "description": "診断ログの削除"
+  },
+  "settingsDiagClearConfirm": {
+    "message": "診断ログを削除しますか？",
+    "description": "診断ログ削除の確認"
+  },
+  "settingsDiagEmpty": {
+    "message": "診断ログはまだありません。",
+    "description": "診断ログが空のときのメッセージ"
   }
 }

@@ -285,8 +285,45 @@
     }
   }
 
+  // 診断ログ（プレイリスト再生後の再起動で先頭へ戻る件の調査用、docs/playlist-restore-investigation.md）。
+  // キーは 'yt_position_' で始めない。popup の一覧・エクスポート・全削除は接頭辞で動画データを選ぶため、
+  // 接頭辞を共有すると診断ログが動画として扱われる。
+  const DIAG_LOG_KEY = 'diag_nav_log';
+  // 1動画あたり数件の記録なので、長いプレイリスト1回分以上を保持できる件数にする。
+  const DIAG_LOG_MAX_ENTRIES = 500;
+
+  // 末尾に追加し、上限を超えた分は古い順に捨てる（入力配列は変更しない）
+  function appendDiagEntry(list, entry, max = DIAG_LOG_MAX_ENTRIES) {
+    const base = Array.isArray(list) ? list : [];
+    const next = base.concat([entry]);
+    return next.length > max ? next.slice(next.length - max) : next;
+  }
+
+  // ログを読みやすくするため、watch URL から動画ID・プレイリストID・index を抜き出す。
+  // 解析できない URL は null を返し、呼び出し側は生の URL だけを残す。
+  function parseWatchUrl(url) {
+    if (typeof url !== 'string' || url === '') return null;
+    let parsed;
+    try {
+      parsed = new URL(url);
+    } catch (e) {
+      return null;
+    }
+    const params = parsed.searchParams;
+    return {
+      path: parsed.pathname,
+      v: params.get('v'),
+      list: params.get('list'),
+      index: params.get('index')
+    };
+  }
+
   const api = {
     DEFAULT_SETTINGS,
+    DIAG_LOG_KEY,
+    DIAG_LOG_MAX_ENTRIES,
+    appendDiagEntry,
+    parseWatchUrl,
     YOUTUBE_VIDEO_ID_PATTERN,
     MAX_TITLE_LENGTH,
     MAX_IMPORT_BYTES,

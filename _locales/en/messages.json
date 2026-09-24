@@ -224,5 +224,29 @@
   "popupOperationError": {
     "message": "The operation failed. Please try again.",
     "description": "Popup operation error"
+  },
+  "settingsSectionDiag": {
+    "message": "Diagnostic log (temporary)",
+    "description": "Diagnostic log section"
+  },
+  "settingsDiagDesc": {
+    "message": "To investigate playlist restore issues, URL changes of YouTube tabs and the tabs present at Chrome startup are recorded (up to 500 entries, stored only on this device).",
+    "description": "Diagnostic log description"
+  },
+  "settingsDiagExport": {
+    "message": "Export log",
+    "description": "Export diagnostic log"
+  },
+  "settingsDiagClear": {
+    "message": "Clear log",
+    "description": "Clear diagnostic log"
+  },
+  "settingsDiagClearConfirm": {
+    "message": "Delete the diagnostic log?",
+    "description": "Diagnostic log delete confirmation"
+  },
+  "settingsDiagEmpty": {
+    "message": "No diagnostic log yet.",
+    "description": "Message when the diagnostic log is empty"
   }
 }

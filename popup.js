@@ -349,6 +349,35 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
+  // 診断ログは動画データのエクスポートと混ぜず、別ファイルとして書き出す
+  async function exportDiagLog() {
+    const stored = await chrome.storage.local.get(Shared.DIAG_LOG_KEY);
+    const entries = Array.isArray(stored[Shared.DIAG_LOG_KEY]) ? stored[Shared.DIAG_LOG_KEY] : [];
+    if (entries.length === 0) {
+      alert(chrome.i18n.getMessage('settingsDiagEmpty') || '診断ログはまだありません。');
+      return;
+    }
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      extensionVersion: chrome.runtime.getManifest().version,
+      entries
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const date = new Date().toISOString().slice(0, 10);
+    link.href = url;
+    link.download = `youtube-position-saver-diag-${date}.json`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async function clearDiagLog() {
+    const confirmMsg = chrome.i18n.getMessage('settingsDiagClearConfirm') || '診断ログを削除しますか？';
+    if (!confirm(confirmMsg)) return;
+    await chrome.storage.local.remove(Shared.DIAG_LOG_KEY);
+  }
+
   async function importData(file) {
     if (file.size > Shared.MAX_IMPORT_BYTES) {
       throw new Error('Import file too large');
@@ -445,6 +474,8 @@
     }));
 
     document.getElementById('exportBtn').addEventListener('click', withErrorBoundary(exportData));
+    document.getElementById('diagExportBtn').addEventListener('click', withErrorBoundary(exportDiagLog));
+    document.getElementById('diagClearBtn').addEventListener('click', withErrorBoundary(clearDiagLog));
     document.getElementById('importBtn').addEventListener('click', () => {
       document.getElementById('importFile').click();
     });
