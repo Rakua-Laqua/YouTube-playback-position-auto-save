@@ -15,6 +15,7 @@ You can save playback positions even if YouTube watch history is turned off. Sav
 - Pause before seeking to the saved position, then optionally resume playback after `seeked` or a maximum wait of 3 seconds.
 - Show a toast notification with the restored position (can be turned off).
 - Turn automatic playback after restoration on or off. When off, the video stays paused at the saved position.
+- After a Chrome restart, if a playlist tab is sent back to the video before autoplay advanced, navigate it to the video you were last watching ([background](docs/playlist-restore-investigation.md), Japanese).
 
 ### Scope Control and Cleanup
 - Skip saving positions below a selected minimum of 10 seconds, 30 seconds, or 1 minute.
@@ -146,10 +147,13 @@ The following permissions are declared in `manifest.json`:
 - `storage`: Save playback positions and settings in the browser.
 - `tabs`: Find and switch to an existing YouTube tab for the same video when opening it from the popup.
 - `scripting`: Reinject `content.js` into existing YouTube tabs after an extension update or reload.
+- `webNavigation`: Detect when Chrome switches a restored tab to a different video after a restart, and navigate it back. Also records YouTube main-frame navigation and history updates in the diagnostic log.
 - `https://www.youtube.com/*`: Run `content.js` on YouTube pages and allow reinjection into existing tabs.
 
 ### Script Injection and Reinjection
 On normal page loads, scripts are injected automatically through `content_scripts` in `manifest.json`. For YouTube tabs that are already open, `background.js` checks whether the content script is responding and reinjects it if needed, only on extension installation, update, or browser startup. When reinjected, `content.js` cleans up old event listeners and timers to prevent duplicate instances.
+
+Diagnostic logs retain up to 500 entries locally. Reload the unpacked extension to enable the new diagnostics. See the [activation and interpretation guide (Japanese)](docs/navigation-diagnostics.md).
 
 ## Key constants
 

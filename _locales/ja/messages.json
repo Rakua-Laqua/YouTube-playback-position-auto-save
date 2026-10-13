@@ -230,7 +230,7 @@
     "description": "診断ログセクション"
   },
   "settingsDiagDesc": {
-    "message": "プレイリストの復元位置を調べるため、YouTubeタブのURLの変化とChrome起動時のタブを記録しています（最大500件、この端末内にのみ保存）。",
+    "message": "プレイリストの復元位置を調べるため、YouTubeタブのURL・ページの読み込み・履歴の更新と、Chrome起動時のタブを記録しています（最大500件、この端末内にのみ保存）。",
     "description": "診断ログの説明"
   },
   "settingsDiagExport": {
