@@ -1,5 +1,17 @@
 # YouTube 再生位置自動保存 - 更新履歴
 
+## [1.10.4] - 2026-11-25
+
+公開向けの一時的な診断ログ機能の除去、復元補正テストの独立化、および日英 README・ドキュメントの実装整合
+
+### Changed
+- **一時的な診断ログ機能の除去（公開向けクリーンアップ）**：プレイリスト復元問題の調査用に導入していた診断ログ（`diag_nav_log`）の記録処理・起動時スナップショット・診断用タブ/ナビゲーション監視を `background.js` から除去し、ポップアップの「診断ログ（一時的）」UI・書き出し/削除ハンドラ・翻訳キー（日英）および `shared.js` のログ定数・バッファ関数を取り除きました。
+  - **本番機能の維持とテスト整理**：既存タブへの `content.js` 再注入と Chrome 再起動後の復元先すり替え補正（`restoreGuardTabs`、URL 判定に `shared.js` の `parseWatchUrl` を利用）は維持したまま、不要となった診断用テスト（`tests/background-diag.test.js`・`tests/browser-diag-smoke.cjs`）を削除し、復元補正の単体テスト 6 件を `tests/background-restore-guard.test.js` として独立化しました。
+- **日英 README とドキュメントの現行実装への整合**：`README.md` および `README.en.md` から診断ログの記述を除去し、`chrome.storage.local` / `chrome.storage.session` の使い分けとデータ構造、`?t=` / `?start=` 指定時の復元スキップ、`document_start` 注入・先行プリフェッチ・一時消音、終了 3 秒以内の適用範囲、復元スキップ時の削除経路や広告 120 秒上限、権限用途、ファイル構成、英語 UI ラベルを現行コードに合わせて更新しました。
+  - **調査記録と目次の整備**：ドキュメント目次（`docs/INDEX.md`）と README 実装差分調査記録（`docs/2026-11-25_readme-implementation-diff.md`）を追加し、`docs/playlist-restore-investigation.md` に診断機能除去の経緯を追記しました。
+
+---
+
 ## [1.10.3] - 2026-10-13
 
 プレイリスト復元先すり替え補正の実環境動作検証記録、および未解決事象（補正前後の微小な音漏れ・読み込み置き換え主体）の原因切り分け・調査計画のドキュメント追記

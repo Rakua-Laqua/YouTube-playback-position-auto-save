@@ -261,26 +261,7 @@ describe('URL timestamp and pre-mute helpers', () => {
 });
 
 
-describe('diagnostic log helpers', () => {
-  it('uses a key that the popup does not treat as video data', () => {
-    assert.equal(Shared.DIAG_LOG_KEY.startsWith('yt_position_'), false);
-  });
-
-  it('appends without mutating the input and starts from non-arrays', () => {
-    const original = [{ n: 1 }];
-    const next = Shared.appendDiagEntry(original, { n: 2 });
-    assert.deepEqual(next, [{ n: 1 }, { n: 2 }]);
-    assert.deepEqual(original, [{ n: 1 }]);
-    assert.deepEqual(Shared.appendDiagEntry(undefined, { n: 1 }), [{ n: 1 }]);
-    assert.deepEqual(Shared.appendDiagEntry({ bogus: true }, { n: 1 }), [{ n: 1 }]);
-  });
-
-  it('drops the oldest entries beyond the limit', () => {
-    let list = [];
-    for (let i = 0; i < 5; i++) list = Shared.appendDiagEntry(list, { n: i }, 3);
-    assert.deepEqual(list, [{ n: 2 }, { n: 3 }, { n: 4 }]);
-  });
-
+describe('parseWatchUrl', () => {
   it('extracts playlist fields from watch URLs', () => {
     assert.deepEqual(
       Shared.parseWatchUrl('https://www.youtube.com/watch?v=abcdefghijk&list=PLxyz&index=6'),

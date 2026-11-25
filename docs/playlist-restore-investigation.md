@@ -195,3 +195,5 @@ Chrome 自身の挙動と確定すれば、上の記録は Chromium への不具
 ## 片付け
 
 原因が分かったら、診断ログの機能（`background.js` の診断ログの部分、ポップアップの「診断ログ（一時的）」、`shared.js` の `DIAG_LOG_KEY` / `appendDiagEntry` / `parseWatchUrl`、関連するテストと翻訳文字列）を取り除き、このメモに結論を書き足す。
+
+2026-11-25 追記: 公開向けに診断ログ機能（`diag_nav_log` の記録・書き出し・削除処理、ポップアップ UI、翻訳文字列、および `shared.js` の `DIAG_LOG_KEY` / `DIAG_LOG_MAX_ENTRIES` / `appendDiagEntry`）と旧診断テスト（`tests/background-diag.test.js`、`tests/browser-diag-smoke.cjs`）をコードから除去し、復元先すり替え補正の単体テストを `tests/background-restore-guard.test.js` へ分離した（`npm test` 53 件成功）。`shared.js` の `parseWatchUrl` は `background.js` の復元補正（`isWatchUrl`）で引き続き使用するため維持している。
